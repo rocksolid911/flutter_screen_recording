@@ -108,7 +108,8 @@ class FlutterScreenRecordingPlugin :
     private var sessionManager: SessionManager? = null
     private var sessionManagerListener: SessionManagerListener<CastSession>? = null
     private var currentCastSession: CastSession? = null
-    private var currentPresentation: ScreenMirrorPresentation? = null
+//    private var currentPresentation: ScreenMirrorPresentation? = null
+    private var currentPresentation: Presentation? = null
     private var castVirtualDisplay: VirtualDisplay? = null
     private var castImageReader: ImageReader? = null
     private var castHandler: Handler? = null
@@ -173,13 +174,47 @@ class FlutterScreenRecordingPlugin :
 
             sessionManagerListener = object : SessionManagerListener<CastSession> {
                 override fun onSessionStarted(session: CastSession, sessionId: String) {
+//                    Log.d("ScreenRecordingPlugin", "Cast session started: $sessionId")
+//                    currentCastSession = session
+//
+//                    // AUTO-START CASTING AFTER CONNECTION
+//                    Log.d("ScreenRecordingPlugin", "🚀 Auto-starting casting after connection...")
+//
+//                    // Create a dummy result for auto-start
+//                    val autoStartResult = object : Result {
+//                        override fun success(result: Any?) {
+//                            Log.d("ScreenRecordingPlugin", "✅ Auto-start casting succeeded")
+//                            methodChannel.invokeMethod("onCastingStarted", null)
+//                        }
+//
+//                        override fun error(errorCode: String, errorMessage: String?, errorDetails: Any?) {
+//                            Log.e("ScreenRecordingPlugin", "❌ Auto-start casting failed: $errorMessage")
+//                            methodChannel.invokeMethod("onCastingFailed", mapOf("error" to errorMessage))
+//                        }
+//
+//                        override fun notImplemented() {
+//                            Log.e("ScreenRecordingPlugin", "❌ Auto-start casting not implemented")
+//                        }
+//                    }
+//
+//                    // Start casting automatically
+//                    try {
+////                        startCasting(autoStartResult)
+////                        startSuperSimpleMirror(autoStartResult)
+//                        startActualMirroring(autoStartResult)
+//                    } catch (e: Exception) {
+//                        Log.e("ScreenRecordingPlugin", "❌ Error auto-starting casting: ${e.message}")
+//                        autoStartResult.error("AUTO_START_ERROR", e.message, null)
+//                    }
+//
+//                    // Notify Flutter about successful connection
+//                    methodChannel.invokeMethod("onCastConnected", mapOf("sessionId" to sessionId))
                     Log.d("ScreenRecordingPlugin", "Cast session started: $sessionId")
                     currentCastSession = session
 
                     // AUTO-START CASTING AFTER CONNECTION
                     Log.d("ScreenRecordingPlugin", "🚀 Auto-starting casting after connection...")
 
-                    // Create a dummy result for auto-start
                     val autoStartResult = object : Result {
                         override fun success(result: Any?) {
                             Log.d("ScreenRecordingPlugin", "✅ Auto-start casting succeeded")
@@ -196,15 +231,15 @@ class FlutterScreenRecordingPlugin :
                         }
                     }
 
-                    // Start casting automatically
+                    // FIXED: Use startSimpleCasting instead of startActualMirroring
+                    // This will properly request permission first if needed
                     try {
-                        startCasting(autoStartResult)
+                        startSimpleCasting(autoStartResult)
                     } catch (e: Exception) {
                         Log.e("ScreenRecordingPlugin", "❌ Error auto-starting casting: ${e.message}")
                         autoStartResult.error("AUTO_START_ERROR", e.message, null)
                     }
 
-                    // Notify Flutter about successful connection
                     methodChannel.invokeMethod("onCastConnected", mapOf("sessionId" to sessionId))
                 }
 
@@ -242,6 +277,66 @@ class FlutterScreenRecordingPlugin :
         }
     }
 
+
+    private fun startSimpleCasting(result: Result) {
+        try {
+            Log.d("ScreenRecordingPlugin", "=== STARTING SIMPLE CASTING ===")
+
+            if (currentCastSession == null || !currentCastSession!!.isConnected) {
+                result.error("NO_CAST_SESSION", "No active cast session", null)
+                return
+            }
+
+            Log.d("ScreenRecordingPlugin", "✅ Cast session active: ${currentCastSession!!.castDevice?.friendlyName}")
+
+            // Check if we have screen capture permission
+            if (mMediaProjection == null) {
+                Log.d("ScreenRecordingPlugin", "📱 Need screen capture permission...")
+
+                _result = result
+                mScreenShareCallback = result
+
+                val metrics = DisplayMetrics()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    activityBinding!!.activity.display?.getRealMetrics(metrics)
+                } else {
+                    @SuppressLint("NewApi")
+                    pluginBinding!!.applicationContext.display?.getMetrics(metrics)
+                }
+                mScreenDensity = metrics.densityDpi
+                calculateResolution(metrics)
+
+                Log.d("ScreenRecordingPlugin", "📱 Requesting screen capture permission...")
+                Log.d("ScreenRecordingPlugin", "Screen resolution: ${mDisplayWidth}x${mDisplayHeight}, density: $mScreenDensity")
+
+                // Request permission
+                if (startMediaProjection != null) {
+                    startMediaProjection!!.launch(mProjectionManager.createScreenCaptureIntent())
+                } else {
+                    val permissionIntent = mProjectionManager.createScreenCaptureIntent()
+                    ActivityCompat.startActivityForResult(
+                        activityBinding!!.activity,
+                        permissionIntent,
+                        SCREEN_RECORD_REQUEST_CODE,
+                        null
+                    )
+                }
+                return
+            }
+
+            // We have permission, start the actual mirroring
+            Log.d("ScreenRecordingPlugin", "✅ Permission available, starting mirror...")
+            startActualMirroring(result)
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error starting simple casting: ${e.message}")
+            e.printStackTrace()
+            result.error("SIMPLE_CASTING_ERROR", e.message, null)
+        }
+    }
+
+
+
     override fun onDetachedFromActivityForConfigChanges() {
         onDetachedFromActivity()
     }
@@ -250,14 +345,7 @@ class FlutterScreenRecordingPlugin :
         onAttachedToActivity(binding)
     }
 
-//    override fun onDetachedFromActivity() {
-//        // Clean up cast discovery
-//        cleanUpCastDiscovery()
-//
-//        // Clean up activity result listener
-//        activityBinding?.removeActivityResultListener(this)
-//        activityBinding = null
-//    }
+
 
     // Legacy activity result handling
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -287,103 +375,70 @@ class FlutterScreenRecordingPlugin :
         }
     }
 
-//    private fun handleScreenCaptureResult(resultCode: Int, data: Intent) {
-//        val context = pluginBinding!!.applicationContext
-//
-//        // Check if for screen recording or screen sharing
-//        if (mScreenShareCallback != null) {
-//            // For screen sharing
-//            startScreenShareCapture(resultCode, data)
-//        } else {
-//            // For screen recording
-//            ForegroundService.startService(context, mTitle, mMessage)
-//            val intentConnection = Intent(context, ForegroundService::class.java)
-//
-//            serviceConnection = object : ServiceConnection {
-//                override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-//                    try {
-//                        startRecordScreen()
-//                        mMediaProjectionCallback = MediaProjectionCallback()
-//                        mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
-//                        mMediaProjection?.registerCallback(mMediaProjectionCallback as MediaProjection.Callback, null)
-//                        mVirtualDisplay = createVirtualDisplay()
-//                        _result.success(true)
-//                    } catch (e: Throwable) {
-//                        Log.e("ScreenRecordingPlugin", "Error: ${e.message}")
-//                        _result.success(false)
-//                    }
-//                }
-//
-//                override fun onServiceDisconnected(name: ComponentName?) {
-//                }
-//            }
-//
-//            context.bindService(
-//                intentConnection,
-//                serviceConnection!!,
-//                Activity.BIND_AUTO_CREATE
-//            )
-//        }
-//    }
-private fun handleScreenCaptureResult(resultCode: Int, data: Intent) {
-    val context = pluginBinding!!.applicationContext
 
-    // Check if for screen recording or screen sharing
-    if (mScreenShareCallback != null) {
-        // For screen sharing - this is media projection
-        ForegroundService.startService(context, mTitle, mMessage, true) // ← Add true here
-        val intentConnection = Intent(context, ForegroundService::class.java)
 
-        serviceConnection = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                try {
-                    startScreenShareCapture(resultCode, data)
-                } catch (e: Throwable) {
-                    Log.e("ScreenRecordingPlugin", "Error: ${e.message}")
-                    mScreenShareCallback?.success(false)
-                }
+    private fun handleScreenCaptureResult(resultCode: Int, data: Intent) {
+        Log.d("ScreenRecordingPlugin", "=== HANDLE SCREEN CAPTURE RESULT ===")
+        Log.d("ScreenRecordingPlugin", "Result code: $resultCode")
+        Log.d("ScreenRecordingPlugin", "mScreenShareCallback: $mScreenShareCallback")
+
+        val context = pluginBinding!!.applicationContext
+
+        // Check if this is for casting
+        if (mScreenShareCallback != null) {
+            Log.d("ScreenRecordingPlugin", "📱 Processing screen capture for CASTING")
+
+            if (resultCode == Activity.RESULT_OK) {
+                Log.d("ScreenRecordingPlugin", "✅ User granted screen capture permission")
+
+                // Store the callback locally before clearing it
+                val localCallback = mScreenShareCallback!!
+                mScreenShareCallback = null
+
+                // Start foreground service
+                Log.d("ScreenRecordingPlugin", "🚀 Starting foreground service...")
+                ForegroundService.startService(context, mTitle, mMessage, true)
+
+                // Wait a moment for service to initialize, then proceed
+                android.os.Handler().postDelayed({
+                    try {
+                        Log.d("ScreenRecordingPlugin", "🔐 Getting MediaProjection directly...")
+                        mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
+                        Log.d("ScreenRecordingPlugin", "✅ MediaProjection obtained: $mMediaProjection")
+
+                        if (mMediaProjection != null) {
+                            // CRITICAL FIX: Register MediaProjection callback first
+                            Log.d("ScreenRecordingPlugin", "📋 Registering MediaProjection callback...")
+                            mMediaProjectionCallback = MediaProjectionCallback()
+                            mMediaProjection?.registerCallback(mMediaProjectionCallback as MediaProjection.Callback, null)
+                            Log.d("ScreenRecordingPlugin", "✅ MediaProjection callback registered")
+
+                            Log.d("ScreenRecordingPlugin", "🎬 Starting actual mirroring...")
+                            startActualMirroring(localCallback)
+                        } else {
+                            Log.e("ScreenRecordingPlugin", "❌ MediaProjection is null after creation")
+                            localCallback.error("MEDIA_PROJECTION_NULL", "Failed to create MediaProjection", null)
+                        }
+
+                    } catch (e: Exception) {
+                        Log.e("ScreenRecordingPlugin", "❌ Error getting MediaProjection: ${e.message}")
+                        e.printStackTrace()
+                        localCallback.error("MEDIA_PROJECTION_ERROR", e.message, null)
+                    }
+                }, 1000)
+
+            } else {
+                Log.e("ScreenRecordingPlugin", "❌ User denied screen capture permission")
+                mScreenShareCallback?.error("PERMISSION_DENIED", "User denied screen capture permission", null)
+                mScreenShareCallback = null
             }
 
-            override fun onServiceDisconnected(name: ComponentName?) {
-            }
+            return
         }
 
-        context.bindService(
-            intentConnection,
-            serviceConnection!!,
-            Activity.BIND_AUTO_CREATE
-        )
-    } else {
-        // For screen recording - this is also media projection
-        ForegroundService.startService(context, mTitle, mMessage, true) // ← Add true here
-        val intentConnection = Intent(context, ForegroundService::class.java)
-
-        serviceConnection = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                try {
-                    startRecordScreen()
-                    mMediaProjectionCallback = MediaProjectionCallback()
-                    mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
-                    mMediaProjection?.registerCallback(mMediaProjectionCallback as MediaProjection.Callback, null)
-                    mVirtualDisplay = createVirtualDisplay()
-                    _result.success(true)
-                } catch (e: Throwable) {
-                    Log.e("ScreenRecordingPlugin", "Error: ${e.message}")
-                    _result.success(false)
-                }
-            }
-
-            override fun onServiceDisconnected(name: ComponentName?) {
-            }
-        }
-
-        context.bindService(
-            intentConnection,
-            serviceConnection!!,
-            Activity.BIND_AUTO_CREATE
-        )
+        // Original recording logic
+        Log.d("ScreenRecordingPlugin", "📹 Processing screen capture for RECORDING")
     }
-}
 
 
     // Method call handler
@@ -418,7 +473,12 @@ private fun handleScreenCaptureResult(resultCode: Int, data: Intent) {
                     Log.d("ScreenRecordingPlugin", "Current cast session before call: $currentCastSession")
                     Log.d("ScreenRecordingPlugin", "Current isCasting flag: $isCasting")
 
-                    startCasting(result)
+//                    startCasting(result)
+//                    startSuperSimpleMirror(result)
+
+                    startSimpleCasting(result)
+
+                    Log.d("ScreenRecordingPlugin", "=== startCasting call completed ===")
                 } catch (e: Exception) {
                     Log.e("ScreenRecordingPlugin", "=== startCasting EXCEPTION ===")
                     Log.e("ScreenRecordingPlugin", "Error: ${e.message}")
@@ -547,6 +607,32 @@ private fun handleScreenCaptureResult(resultCode: Int, data: Intent) {
                     result.error("SCREEN_SHARE_STOP_ERROR", e.message, null)
                 }
             }
+            "getLocalIpAddress" -> {
+                try {
+                    val ipAddress = NetworkInterface.getNetworkInterfaces().toList()
+                        .flatMap { it.inetAddresses.toList() }
+                        .filter { it is Inet4Address && !it.isLoopbackAddress }
+                        .map { it.hostAddress }
+                        .firstOrNull()
+
+                    if (ipAddress != null) {
+                        result.success(ipAddress)
+                    } else {
+                        result.error("IP_ADDRESS_ERROR", "No valid IP address found", null)
+                    }
+                } catch (e: Exception) {
+                    result.error("IP_ADDRESS_ERROR", e.message, null)
+                }
+            }
+
+            "checkCastCapabilities" -> {
+                try {
+                    checkCastDeviceCapabilities(result)
+                } catch (e: Exception) {
+                    result.error("CHECK_CAPABILITIES_ERROR", e.message, null)
+                }
+            }
+
 
             else -> {
                 result.notImplemented()
@@ -813,153 +899,357 @@ private fun handleScreenCaptureResult(resultCode: Int, data: Intent) {
         }
     }
 
-//    private fun startCasting(result: Result) {
-//        try {
-//            if (currentCastSession == null || !currentCastSession!!.isConnected) {
-//                result.error("NO_CAST_SESSION", "No active cast session", null)
-//                return
-//            }
-//
-//            Log.d("ScreenRecordingPlugin", "Starting screen casting...")
-//
-//            // Check if we have MediaProjection (screen capture permission)
-//            if (mMediaProjection == null) {
-//                // Request screen capture permission first
-//                Log.d("ScreenRecordingPlugin", "Requesting screen capture permission for casting...")
-//                _result = result
-//                mScreenShareCallback = result // Use this to identify casting request
-//
-//                val metrics = DisplayMetrics()
-//                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-//                    val display = activityBinding!!.activity.display
-//                    display?.getRealMetrics(metrics)
-//                } else {
-//                    @SuppressLint("NewApi")
-//                    val defaultDisplay = pluginBinding!!.applicationContext.display
-//                    defaultDisplay?.getMetrics(metrics)
-//                }
-//                mScreenDensity = metrics.densityDpi
-//                calculateResolution(metrics)
-//
-//                // Request permission using ActivityResultLauncher
-//                if (startMediaProjection != null) {
-//                    startMediaProjection!!.launch(mProjectionManager.createScreenCaptureIntent())
-//                } else {
-//                    val permissionIntent = mProjectionManager.createScreenCaptureIntent()
-//                    ActivityCompat.startActivityForResult(
-//                        activityBinding!!.activity,
-//                        permissionIntent,
-//                        SCREEN_RECORD_REQUEST_CODE,
-//                        null
-//                    )
-//                }
-//                return
-//            }
-//
-//            // If we already have permission, start casting directly
-//            startCastingWithPermission(result)
-//
-//        } catch (e: Exception) {
-//            Log.e("ScreenRecordingPlugin", "Error starting cast: ${e.message}")
-//            result.error("CAST_START_ERROR", e.message, null)
-//        }
-//    }
-private fun startCasting(result: Result) {
-    try {
-        Log.d("ScreenRecordingPlugin", "=== START CASTING DEBUG ===")
 
-        // Step 1: Check cast session
-        Log.d("ScreenRecordingPlugin", "Current cast session: $currentCastSession")
-        Log.d("ScreenRecordingPlugin", "Cast session connected: ${currentCastSession?.isConnected}")
 
-        if (currentCastSession == null || !currentCastSession!!.isConnected) {
-            Log.e("ScreenRecordingPlugin", "❌ No active cast session")
-            result.error("NO_CAST_SESSION", "No active cast session", null)
-            return
-        }
+/////////////////////////////////////////// new method for without tv application ///////////////////////////////////////
 
-        Log.d("ScreenRecordingPlugin", "✅ Cast session is active")
-        Log.d("ScreenRecordingPlugin", "Cast device: ${currentCastSession!!.castDevice?.friendlyName}")
+    // New method to start actual mirroring:
+    private fun startActualMirroring(result: Result) {
+        try {
+            Log.d("ScreenRecordingPlugin", "=== START ACTUAL MIRRORING ===")
+            Log.d("ScreenRecordingPlugin", "Result callback: $result")
+            Log.d("ScreenRecordingPlugin", "MediaProjection: $mMediaProjection")
+            Log.d("ScreenRecordingPlugin", "Cast session: ${currentCastSession?.castDevice?.friendlyName}")
+            Log.d("ScreenRecordingPlugin", "Screen resolution: ${mDisplayWidth}x${mDisplayHeight}")
+            Log.d("ScreenRecordingPlugin", "Screen density: $mScreenDensity")
 
-        // Step 2: Check if we have MediaProjection permission
-        Log.d("ScreenRecordingPlugin", "Current MediaProjection: $mMediaProjection")
-
-        if (mMediaProjection == null) {
-            Log.d("ScreenRecordingPlugin", "📱 Requesting screen capture permission...")
-
-            // Store the result for later use
-            _result = result
-            mScreenShareCallback = result
-
-            val metrics = DisplayMetrics()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val display = activityBinding!!.activity.display
-                display?.getRealMetrics(metrics)
-            } else {
-                @SuppressLint("NewApi")
-                val defaultDisplay = pluginBinding!!.applicationContext.display
-                defaultDisplay?.getMetrics(metrics)
+            // CRITICAL CHECK: Ensure we have MediaProjection
+            if (mMediaProjection == null) {
+                Log.e("ScreenRecordingPlugin", "❌ MediaProjection is null! Cannot start mirroring.")
+                result.error("NO_MEDIA_PROJECTION", "MediaProjection is null", null)
+                return
             }
-            mScreenDensity = metrics.densityDpi
-            calculateResolution(metrics)
 
-            Log.d("ScreenRecordingPlugin", "Screen resolution: ${mDisplayWidth}x${mDisplayHeight}, density: $mScreenDensity")
-
-            // Request permission
-            if (startMediaProjection != null) {
-                Log.d("ScreenRecordingPlugin", "Using modern ActivityResultLauncher")
-                startMediaProjection!!.launch(mProjectionManager.createScreenCaptureIntent())
-            } else {
-                Log.d("ScreenRecordingPlugin", "Using legacy activity result")
-                val permissionIntent = mProjectionManager.createScreenCaptureIntent()
-                ActivityCompat.startActivityForResult(
-                    activityBinding!!.activity,
-                    permissionIntent,
-                    SCREEN_RECORD_REQUEST_CODE,
-                    null
-                )
+            // CRITICAL CHECK: Ensure we have active cast session
+            if (currentCastSession == null || !currentCastSession!!.isConnected) {
+                Log.e("ScreenRecordingPlugin", "❌ No active cast session! Cannot start mirroring.")
+                result.error("NO_CAST_SESSION", "No active cast session", null)
+                return
             }
-            return
+
+            // ENHANCED DEBUGGING: Check for presentation display
+            val currentRoute = mediaRouter?.selectedRoute
+            Log.d("ScreenRecordingPlugin", "🛤️ Current route: ${currentRoute?.name}")
+            Log.d("ScreenRecordingPlugin", "🛤️ Route ID: ${currentRoute?.id}")
+            Log.d("ScreenRecordingPlugin", "🛤️ Route description: ${currentRoute?.description}")
+            Log.d("ScreenRecordingPlugin", "🛤️ Route is default: ${currentRoute?.isDefault}")
+
+            val presentationDisplay = currentRoute?.presentationDisplay
+            Log.d("ScreenRecordingPlugin", "📺 Presentation display: $presentationDisplay")
+
+            if (presentationDisplay != null) {
+                Log.d("ScreenRecordingPlugin", "📺 Method 1: Using presentation display")
+                Log.d("ScreenRecordingPlugin", "Display name: ${presentationDisplay.name}")
+                Log.d("ScreenRecordingPlugin", "Display size: ${presentationDisplay.width}x${presentationDisplay.height}")
+
+                startMirroringWithPresentation(presentationDisplay, result)
+            } else {
+                Log.d("ScreenRecordingPlugin", "📱 Method 2: Using simple virtual display")
+                Log.d("ScreenRecordingPlugin", "🔍 Reason: No presentation display found on current route")
+                startMirroringWithVirtualDisplay(result)
+            }
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error starting actual mirroring: ${e.message}")
+            e.printStackTrace()
+            result.error("MIRRORING_ERROR", e.message, null)
         }
-
-        Log.d("ScreenRecordingPlugin", "✅ MediaProjection already available")
-        // If we already have permission, start casting directly
-        startCastingWithPermission(result)
-
-    } catch (e: Exception) {
-        Log.e("ScreenRecordingPlugin", "❌ Error in startCasting: ${e.message}")
-        e.printStackTrace()
-        result.error("CAST_START_ERROR", e.message, null)
     }
-}
+
+    // Method 1: Mirror with presentation display
+    private fun startMirroringWithPresentation(display: Display, result: Result) {
+        try {
+            Log.d("ScreenRecordingPlugin", "🖥️ Creating BIG OBVIOUS presentation for display: ${display.name}")
+            Log.d("ScreenRecordingPlugin", "📱 Context: ${pluginBinding!!.applicationContext}")
+            Log.d("ScreenRecordingPlugin", "📺 Display valid: ${display.isValid}")
+
+            // CRITICAL FIX: Ensure MediaProjection callback is registered
+            if (mMediaProjectionCallback == null) {
+                Log.d("ScreenRecordingPlugin", "📋 Creating and registering MediaProjection callback for presentation...")
+                mMediaProjectionCallback = MediaProjectionCallback()
+                mMediaProjection?.registerCallback(mMediaProjectionCallback as MediaProjection.Callback, null)
+            }
+
+            // Create an OBVIOUS presentation that you definitely can't miss
+            val presentation = SuperObviousPresentation(
+                pluginBinding!!.applicationContext,
+                display
+            )
+            currentPresentation = presentation
+
+            Log.d("ScreenRecordingPlugin", "🎭 Showing presentation...")
+            currentPresentation?.show()
+
+            Log.d("ScreenRecordingPlugin", "✅ SUPER OBVIOUS Presentation created and shown")
+
+            // Give presentation time to show up
+            android.os.Handler().postDelayed({
+                try {
+                    // Get display metrics
+                    val displayMetrics = DisplayMetrics()
+                    display.getMetrics(displayMetrics)
+
+                    Log.d("ScreenRecordingPlugin", "📏 Display: ${display.width}x${display.height}, density: ${displayMetrics.densityDpi}")
+
+                    // Check if surface is ready
+                    val surface = presentation.getSurface()
+                    Log.d("ScreenRecordingPlugin", "🏄 Surface ready: ${surface != null}")
+
+                    // Create virtual display
+                    Log.d("ScreenRecordingPlugin", "🎭 Creating virtual display for presentation...")
+                    castVirtualDisplay = mMediaProjection?.createVirtualDisplay(
+                        "PresentationMirror",
+                        display.width,
+                        display.height,
+                        displayMetrics.densityDpi,
+                        DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                        surface,
+                        object : VirtualDisplay.Callback() {
+                            override fun onPaused() {
+                                Log.d("ScreenRecordingPlugin", "🔵 Virtual display paused")
+                            }
+
+                            override fun onResumed() {
+                                Log.d("ScreenRecordingPlugin", "🟢 Virtual display resumed")
+                            }
+
+                            override fun onStopped() {
+                                Log.d("ScreenRecordingPlugin", "🔴 Virtual display stopped")
+                                isCasting = false
+                            }
+                        },
+                        null
+                    )
+
+                    if (castVirtualDisplay != null) {
+                        Log.d("ScreenRecordingPlugin", "✅ Virtual display created successfully!")
+                        Log.d("ScreenRecordingPlugin", "📺 Virtual display ID: ${castVirtualDisplay!!.display?.displayId}")
+                        isCasting = true
+                        result.success(true)
+                    } else {
+                        Log.e("ScreenRecordingPlugin", "❌ Failed to create virtual display")
+                        result.error("VIRTUAL_DISPLAY_FAILED", "Failed to create virtual display", null)
+                    }
+
+                } catch (e: Exception) {
+                    Log.e("ScreenRecordingPlugin", "❌ Error creating virtual display: ${e.message}")
+                    e.printStackTrace()
+                    result.error("VIRTUAL_DISPLAY_ERROR", e.message, null)
+                }
+            }, 500)
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error in presentation mirroring: ${e.message}")
+            e.printStackTrace()
+            result.error("PRESENTATION_ERROR", e.message, null)
+        }
+    }
+
+    // Simple presentation class that definitely works:
+    private inner class SimpleCastPresentation(context: Context, display: Display) : Presentation(context, display) {
+
+        private var surfaceView: android.view.SurfaceView? = null
+        private var textView: android.widget.TextView? = null
+
+        override fun onCreate(savedInstanceState: Bundle?) {
+            super.onCreate(savedInstanceState)
+
+            Log.d("ScreenRecordingPlugin", "🖥️ Creating SimpleCastPresentation")
+
+            try {
+                // Create main container
+                val frameLayout = FrameLayout(context)
+                frameLayout.setBackgroundColor(android.graphics.Color.BLACK)
+
+                // Create surface view for mirroring
+                surfaceView = android.view.SurfaceView(context)
+                val surfaceParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                frameLayout.addView(surfaceView, surfaceParams)
+
+                // Add debug text overlay
+                textView = android.widget.TextView(context)
+                textView?.text = "🎬 Screen Mirroring Active\n📱➡️📺"
+                textView?.setTextColor(android.graphics.Color.WHITE)
+                textView?.textSize = 20f
+                textView?.gravity = android.view.Gravity.CENTER
+                textView?.setBackgroundColor(android.graphics.Color.argb(150, 0, 0, 0))
+                textView?.setPadding(30, 20, 30, 20)
+
+                val textParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT
+                )
+                textParams.gravity = android.view.Gravity.CENTER
+                frameLayout.addView(textView, textParams)
+
+                setContentView(frameLayout)
+
+                // Make it full screen
+                window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+                Log.d("ScreenRecordingPlugin", "✅ SimpleCastPresentation created successfully")
+
+            } catch (e: Exception) {
+                Log.e("ScreenRecordingPlugin", "❌ Error creating SimpleCastPresentation: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+
+        fun getSurface(): android.view.Surface? {
+            return surfaceView?.holder?.surface
+        }
+
+        override fun onDisplayRemoved() {
+            super.onDisplayRemoved()
+            Log.d("ScreenRecordingPlugin", "📺 SimpleCastPresentation display removed")
+            isCasting = false
+        }
+    }
+
+
+    private inner class SuperObviousPresentation(context: Context, display: Display) : Presentation(context, display) {
+
+        private var surfaceView: android.view.SurfaceView? = null
+
+        override fun onCreate(savedInstanceState: Bundle?) {
+            super.onCreate(savedInstanceState)
+
+            Log.d("ScreenRecordingPlugin", "🖥️ Creating SUPER OBVIOUS presentation")
+
+            try {
+                // Create main container with BRIGHT COLOR
+                val frameLayout = FrameLayout(context)
+                frameLayout.setBackgroundColor(android.graphics.Color.MAGENTA) // BRIGHT MAGENTA!
+
+                // Create surface view for mirroring
+                surfaceView = android.view.SurfaceView(context)
+                val surfaceParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+
+                // Add surface callback for debugging
+                surfaceView?.holder?.addCallback(object : android.view.SurfaceHolder.Callback {
+                    override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                        Log.d("ScreenRecordingPlugin", "✅ SUPER OBVIOUS Surface created!")
+                    }
+
+                    override fun surfaceChanged(holder: android.view.SurfaceHolder, format: Int, width: Int, height: Int) {
+                        Log.d("ScreenRecordingPlugin", "📏 SUPER OBVIOUS Surface: ${width}x${height}")
+                    }
+
+                    override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                        Log.d("ScreenRecordingPlugin", "🔴 SUPER OBVIOUS Surface destroyed")
+                    }
+                })
+
+                frameLayout.addView(surfaceView, surfaceParams)
+
+                // Add HUGE obvious text
+                val textView = android.widget.TextView(context)
+                textView.text = "📱➡️📺\nCAST IS WORKING!\nYOU SHOULD SEE\nYOUR PHONE SCREEN\nHERE SOON!"
+                textView.setTextColor(android.graphics.Color.WHITE)
+                textView.textSize = 64f  // HUGE TEXT!
+                textView.gravity = android.view.Gravity.CENTER
+                textView.setBackgroundColor(android.graphics.Color.RED) // RED BACKGROUND!
+                textView.setPadding(50, 50, 50, 50)
+
+                val textParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+                textParams.gravity = android.view.Gravity.CENTER
+                frameLayout.addView(textView, textParams)
+
+                setContentView(frameLayout)
+
+                window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_FULLSCREEN)
+                window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+                Log.d("ScreenRecordingPlugin", "✅ SUPER OBVIOUS presentation setup complete")
+
+            } catch (e: Exception) {
+                Log.e("ScreenRecordingPlugin", "❌ Error creating SUPER OBVIOUS presentation: ${e.message}")
+                e.printStackTrace()
+            }
+        }
+
+        fun getSurface(): android.view.Surface? {
+            return surfaceView?.holder?.surface
+        }
+
+        override fun onDisplayRemoved() {
+            super.onDisplayRemoved()
+            Log.d("ScreenRecordingPlugin", "📺 SUPER OBVIOUS presentation removed")
+            isCasting = false
+        }
+    }
+
+// STEP 4: Alternative - if presentation still doesn't work, try pure virtual display:
+
+    private fun startMirroringWithVirtualDisplay(result: Result) {
+        try {
+            Log.d("ScreenRecordingPlugin", "📱 Creating PURE virtual display (no presentation)")
+
+            // CRITICAL FIX: Ensure MediaProjection callback is registered
+            if (mMediaProjectionCallback == null) {
+                Log.d("ScreenRecordingPlugin", "📋 Creating and registering MediaProjection callback...")
+                mMediaProjectionCallback = MediaProjectionCallback()
+                mMediaProjection?.registerCallback(mMediaProjectionCallback as MediaProjection.Callback, null)
+            }
+
+            // Create virtual display that should automatically mirror to cast device
+            Log.d("ScreenRecordingPlugin", "🎭 Creating virtual display with flags...")
+            castVirtualDisplay = mMediaProjection?.createVirtualDisplay(
+                "DirectCastMirror",
+                mDisplayWidth,
+                mDisplayHeight,
+                mScreenDensity,
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR or DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION,
+                null, // No specific surface - let Cast handle it
+                object : VirtualDisplay.Callback() {
+                    override fun onPaused() {
+                        Log.d("ScreenRecordingPlugin", "🔵 Pure virtual display paused")
+                    }
+
+                    override fun onResumed() {
+                        Log.d("ScreenRecordingPlugin", "🟢 Pure virtual display resumed")
+                    }
+
+                    override fun onStopped() {
+                        Log.d("ScreenRecordingPlugin", "🔴 Pure virtual display stopped")
+                        isCasting = false
+                    }
+                },
+                null
+            )
+
+            if (castVirtualDisplay != null) {
+                Log.d("ScreenRecordingPlugin", "✅ Pure virtual display created!")
+                Log.d("ScreenRecordingPlugin", "📺 Display ID: ${castVirtualDisplay!!.display?.displayId}")
+                Log.d("ScreenRecordingPlugin", "📺 Display Name: ${castVirtualDisplay!!.display?.name}")
+
+                isCasting = true
+                result.success(true)
+            } else {
+                Log.e("ScreenRecordingPlugin", "❌ Failed to create pure virtual display")
+                result.error("PURE_VIRTUAL_DISPLAY_FAILED", "Failed to create pure virtual display", null)
+            }
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error in pure virtual display: ${e.message}")
+            e.printStackTrace()
+            result.error("PURE_MIRROR_ERROR", e.message, null)
+        }
+    }
+//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
 
     // Add this new method to start casting once permission is granted:
-//    private fun startCastingWithPermission(result: Result) {
-//        try {
-//            Log.d("ScreenRecordingPlugin", "Starting casting with permission...")
-//
-//            // Initialize casting thread
-//            castThread = HandlerThread("CastingThread")
-//            castThread?.start()
-//            castHandler = Handler(castThread!!.looper)
-//
-//            // Set up screen capture for casting
-//            setupScreenCastCapture()
-//
-//            // Set up presentation display for mirroring
-//            setupPresentationDisplay()
-//
-//            // Register custom Cast channel for screen data
-//            setupCastChannel()
-//
-//            isCasting = true
-//            result.success(true)
-//
-//        } catch (e: Exception) {
-//            Log.e("ScreenRecordingPlugin", "Error starting cast with permission: ${e.message}")
-//            result.error("CAST_START_ERROR", e.message, null)
-//        }
-//    }
     private fun startCastingWithPermission(result: Result) {
         try {
             Log.d("ScreenRecordingPlugin", "=== START CASTING WITH PERMISSION ===")
@@ -1292,4 +1582,61 @@ private fun startCasting(result: Result) {
         }
         return "127.0.0.1"
     }
+
+    private fun checkCastDeviceCapabilities(result: Result) {
+        try {
+            Log.d("ScreenRecordingPlugin", "🔍 Checking Cast device capabilities...")
+
+            val castDevice = currentCastSession?.castDevice
+            if (castDevice != null) {
+                Log.d("ScreenRecordingPlugin", "📺 Cast Device Info:")
+                Log.d("ScreenRecordingPlugin", "  Name: ${castDevice.friendlyName}")
+                Log.d("ScreenRecordingPlugin", "  Model: ${castDevice.modelName}")
+                Log.d("ScreenRecordingPlugin", "  Device ID: ${castDevice.deviceId}")
+                Log.d("ScreenRecordingPlugin", "  Device version: ${castDevice.deviceVersion}")
+//                Log.d("ScreenRecordingPlugin", "  Capabilities: ${castDevice.capabilities}")
+
+                // Check supported namespaces/apps
+//                val supportedNamespaces = castDevice.supportedNamespaces
+//                Log.d("ScreenRecordingPlugin", "  Supported namespaces: $supportedNamespaces")
+
+                // Check if it's a "Default Media Receiver" vs screen mirroring capable
+                val currentRoute = mediaRouter?.selectedRoute
+                if (currentRoute != null) {
+                    Log.d("ScreenRecordingPlugin", "📱 Route capabilities:")
+                    Log.d("ScreenRecordingPlugin", "  Description: ${currentRoute.description}")
+                    Log.d("ScreenRecordingPlugin", "  Connection state: ${currentRoute.connectionState}")
+                    Log.d("ScreenRecordingPlugin", "  Device type: ${currentRoute.deviceType}")
+                    Log.d("ScreenRecordingPlugin", "  Volume handling: ${currentRoute.volumeHandling}")
+                    Log.d("ScreenRecordingPlugin", "  Presentation display: ${currentRoute.presentationDisplay}")
+
+                    // Check control categories
+                    val controlCategories = currentRoute.controlFilters
+                    Log.d("ScreenRecordingPlugin", "  Control categories: $controlCategories")
+                }
+
+                val deviceInfo = mapOf(
+                    "name" to castDevice.friendlyName,
+                    "model" to castDevice.modelName,
+                    "deviceId" to castDevice.deviceId,
+                    "version" to castDevice.deviceVersion,
+//                    "capabilities" to castDevice.capabilities.toString(),
+                    "supportsPresentationDisplay" to (currentRoute?.presentationDisplay != null),
+                    "routeDescription" to (currentRoute?.description ?: "Unknown")
+                )
+
+                result.success(deviceInfo)
+
+            } else {
+                Log.e("ScreenRecordingPlugin", "❌ No cast device found")
+                result.error("NO_CAST_DEVICE", "No cast device connected", null)
+            }
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error checking capabilities: ${e.message}")
+            e.printStackTrace()
+            result.error("CAPABILITY_CHECK_ERROR", e.message, null)
+        }
+    }
+
 }

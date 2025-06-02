@@ -185,7 +185,27 @@ class FlutterScreenRecording {
     }
   }
 
+static Future<String?> getLocalIpAddress() async {
+  try {
+    return await FlutterScreenRecordingPlatform.instance.getLocalIpAddress();
+  } catch (e) {
+    print("getLocalIpAddress error: $e");
+    return null;
+  }
+}
 
+static Future<Map<String, dynamic>?> checkCastCapabilities() async {
+  try {
+    final result = await FlutterScreenRecordingPlatform.instance.checkCastCapabilities();
+    if (result is Map) {
+      return Map<String, dynamic>.from(result as Map);
+    }
+    return null;
+  } catch (e) {
+    print("checkCastCapabilities error: $e");
+    return null;
+  }
+}
   //method to listen devices discovery
 // Update this method in flutter_screen_recording.dart
   static Stream<CastDevice> get onDeviceDiscovered {

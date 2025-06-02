@@ -80,6 +80,15 @@ abstract class FlutterScreenRecordingPlatform extends PlatformInterface {
     throw UnimplementedError();
   }
 
+
+  Future<String?> getLocalIpAddress(){
+    throw UnimplementedError();
+  }
+
+  Future<Map<String, dynamic>?> checkCastCapabilities(){
+    throw UnimplementedError();
+  }
+
   // Optional: Add this method if you need to clean up resources
   void dispose() {
     // Default implementation is empty

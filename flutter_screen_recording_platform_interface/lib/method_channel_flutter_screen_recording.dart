@@ -132,7 +132,29 @@ class MethodChannelFlutterScreenRecording
     }
   }
 
-  //write a method to listen devices discovery
+// Add to MethodChannelFlutterScreenRecording class
+
+Future<String?> getLocalIpAddress() async {
+  try {
+    return await _channel.invokeMethod<String>('getLocalIpAddress');
+  } catch (e) {
+    print("getLocalIpAddress error: $e");
+    return null;
+  }
+}
+
+Future<Map<String, dynamic>?> checkCastCapabilities() async {
+  try {
+    final result = await _channel.invokeMethod('checkCastCapabilities');
+    if (result is Map) {
+      return Map<String, dynamic>.from(result);
+    }
+    return null;
+  } catch (e) {
+    print("checkCastCapabilities error: $e");
+    return null;
+  }
+}
 
 
   void dispose() {
