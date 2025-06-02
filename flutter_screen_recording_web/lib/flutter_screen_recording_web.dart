@@ -4,10 +4,13 @@ import 'dart:async';
 import 'dart:html';
 import 'dart:js';
 
+import 'package:flutter_screen_recording_platform_interface/flutter_screen_recording_platform_interface.dart';
+
 import 'interop/get_display_media.dart';
 
-import 'package:flutter_screen_recording_platform_interface/flutter_screen_recording_platform_interface.dart';
+
 import 'package:flutter_web_plugins/flutter_web_plugins.dart';
+
 
 class WebFlutterScreenRecording extends FlutterScreenRecordingPlatform {
   MediaStream? stream;
@@ -138,4 +141,8 @@ class WebFlutterScreenRecording extends FlutterScreenRecordingPlatform {
     mediaRecorder!.stop();
     return c.future;
   }
+
+  @override
+  // TODO: implement onDeviceDiscovered
+  Stream<CastDevice> get onDeviceDiscovered => throw UnimplementedError();
 }

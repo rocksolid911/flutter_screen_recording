@@ -2,7 +2,7 @@ group 'com.isvisoft.flutter_screen_recording'
 version '1.0-SNAPSHOT'
 
 buildscript {
-    ext.kotlin_version = '1.8.0'
+    ext.kotlin_version = '2.1.0'
     repositories {
         google()
         jcenter()
@@ -59,7 +59,9 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.6.0'
     implementation 'com.github.HBiSoft:HBRecorder:2.0.5'
 
-
+    implementation 'com.google.android.gms:play-services-cast-framework:21.3.0'
+    implementation 'androidx.mediarouter:mediarouter:1.4.0'
+    implementation 'androidx.appcompat:appcompat:1.6.1'
     // Flutter dependencies
     //compileOnly("io.flutter:flutter_embedding_debug:1.0.0-dbec018f4d83ae4b7b97eb8c5a066c61832e12df") // For debug
     //compileOnly("io.flutter:flutter_embedding_release:1.0.0-dbec018f4d83ae4b7b97eb8c5a066c61832e12df") // For release
