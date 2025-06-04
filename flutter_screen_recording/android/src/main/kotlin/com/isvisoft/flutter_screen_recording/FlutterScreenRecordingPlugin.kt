@@ -114,6 +114,8 @@ class FlutterScreenRecordingPlugin :
     private var castHandler: Handler? = null
     private var castThread: HandlerThread? = null
 
+    private var lastFrameTime = 0L
+
     
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         pluginBinding = binding
@@ -326,68 +328,428 @@ class FlutterScreenRecordingPlugin :
 
 
 
+//private fun handleScreenCaptureResult(resultCode: Int, data: Intent) {
+//    Log.d("ScreenRecordingPlugin", "=== HANDLE SCREEN CAPTURE RESULT ===")
+//    Log.d("ScreenRecordingPlugin", "Result code: $resultCode")
+//    Log.d("ScreenRecordingPlugin", "Expected RESULT_OK: ${Activity.RESULT_OK}")
+//    Log.d("ScreenRecordingPlugin", "mScreenShareCallback: $mScreenShareCallback")
+//    Log.d("ScreenRecordingPlugin", "Current cast session: $currentCastSession")
+//    Log.d("ScreenRecordingPlugin", "Cast session connected: ${currentCastSession?.isConnected}")
+//
+//    val context = pluginBinding!!.applicationContext
+//
+//    if (resultCode == Activity.RESULT_OK && data != null) {
+//        Log.d("ScreenRecordingPlugin", "✅ Screen capture permission GRANTED")
+//
+//        // Check if this is for casting (mScreenShareCallback is set AND cast session is active)
+//        if (mScreenShareCallback != null && currentCastSession?.isConnected == true) {
+//            Log.d("ScreenRecordingPlugin", "🎬 This is for CASTING - starting foreground service first")
+//
+//            // Start foreground service BEFORE creating MediaProjection
+//            try {
+//                Log.d("ScreenRecordingPlugin", "Starting foreground service for casting...")
+//                ForegroundService.startService(context, "Screen Casting", "Casting screen to TV", true)
+//
+//                // Add delay to ensure service starts
+//                Handler(android.os.Looper.getMainLooper()).postDelayed({
+//                    Log.d("ScreenRecordingPlugin", "Attempting to bind to service...")
+//
+//                    // Create intent for service connection
+//                    val intentConnection = Intent(context, ForegroundService::class.java)
+//
+//                    serviceConnection = object : ServiceConnection {
+//                        override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+//                            Log.d("ScreenRecordingPlugin", "🔗 *** FOREGROUND SERVICE CONNECTED FOR CASTING ***")
+//                            Log.d("ScreenRecordingPlugin", "Service: $service")
+//                            Log.d("ScreenRecordingPlugin", "Component: $name")
+//
+//                            // Now create MediaProjection within the foreground service context
+//                            try {
+//                                Log.d("ScreenRecordingPlugin", "Creating MediaProjection...")
+//                                mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
+//                                Log.d("ScreenRecordingPlugin", "✅ MediaProjection created successfully: $mMediaProjection")
+//
+//                                // Start the actual casting
+//                                Log.d("ScreenRecordingPlugin", "Starting casting with permission...")
+//                                startCastingWithPermissionDirectly()
+//
+//                            } catch (e: Exception) {
+//                                Log.e("ScreenRecordingPlugin", "❌ Error creating MediaProjection in service: ${e.message}")
+//                                e.printStackTrace()
+//                                mScreenShareCallback?.error("MEDIA_PROJECTION_ERROR", e.message, null)
+//                            }
+//                        }
+//
+//                        override fun onServiceDisconnected(name: ComponentName?) {
+//                            Log.d("ScreenRecordingPlugin", "🔗 Foreground service disconnected")
+//                            Log.d("ScreenRecordingPlugin", "Component: $name")
+//                        }
+//
+//                        override fun onBindingDied(name: ComponentName?) {
+//                            Log.e("ScreenRecordingPlugin", "❌ Service binding died: $name")
+//                        }
+//
+//                        override fun onNullBinding(name: ComponentName?) {
+//                            Log.e("ScreenRecordingPlugin", "❌ Service returned null binding: $name")
+//                        }
+//                    }
+//
+//                    // Bind to the service
+//                    Log.d("ScreenRecordingPlugin", "Binding to service...")
+//                    val bindResult = context.bindService(
+//                        intentConnection,
+//                        serviceConnection!!,
+//                        Activity.BIND_AUTO_CREATE or Activity.BIND_IMPORTANT
+//                    )
+//                    Log.d("ScreenRecordingPlugin", "Bind result: $bindResult")
+//
+//                    if (!bindResult) {
+//                        Log.e("ScreenRecordingPlugin", "❌ Failed to bind to service!")
+//                        mScreenShareCallback?.error("SERVICE_BIND_ERROR", "Failed to bind to foreground service", null)
+//                    }
+//
+//                }, 500) // Wait 500ms for service to start
+//
+//            } catch (e: Exception) {
+//                Log.e("ScreenRecordingPlugin", "❌ Error starting foreground service: ${e.message}")
+//                e.printStackTrace()
+//                mScreenShareCallback?.error("FOREGROUND_SERVICE_ERROR", e.message, null)
+//            }
+//
+//        } else if (mScreenShareCallback != null) {
+//            Log.d("ScreenRecordingPlugin", "📱 This is for SCREEN SHARING - starting screen share")
+//
+//            // Handle regular screen sharing (existing code)
+//            ForegroundService.startService(context, mTitle, mMessage, true)
+//            val intentConnection = Intent(context, ForegroundService::class.java)
+//
+//            serviceConnection = object : ServiceConnection {
+//                override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+//                    try {
+//                        Log.d("ScreenRecordingPlugin", "🔗 Service connected for screen sharing")
+//                        startScreenShareCapture(resultCode, data)
+//                    } catch (e: Throwable) {
+//                        Log.e("ScreenRecordingPlugin", "❌ Error in screen share: ${e.message}")
+//                        mScreenShareCallback?.success(false)
+//                    }
+//                }
+//
+//                override fun onServiceDisconnected(name: ComponentName?) {
+//                    Log.d("ScreenRecordingPlugin", "🔗 Service disconnected")
+//                }
+//            }
+//
+//            context.bindService(intentConnection, serviceConnection!!, Activity.BIND_AUTO_CREATE)
+//
+//        } else {
+//            Log.d("ScreenRecordingPlugin", "📹 This is for SCREEN RECORDING - starting recording")
+//
+//            // Handle regular screen recording (existing code)
+//            ForegroundService.startService(context, mTitle, mMessage, true)
+//            val intentConnection = Intent(context, ForegroundService::class.java)
+//
+//            serviceConnection = object : ServiceConnection {
+//                override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+//                    try {
+//                        Log.d("ScreenRecordingPlugin", "🔗 Service connected for recording")
+//                        startRecordScreen()
+//                        mMediaProjectionCallback = MediaProjectionCallback()
+//                        mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
+//                        mMediaProjection?.registerCallback(mMediaProjectionCallback as MediaProjection.Callback, null)
+//                        mVirtualDisplay = createVirtualDisplay()
+//                        _result.success(true)
+//                    } catch (e: Throwable) {
+//                        Log.e("ScreenRecordingPlugin", "❌ Error in recording: ${e.message}")
+//                        _result.success(false)
+//                    }
+//                }
+//
+//                override fun onServiceDisconnected(name: ComponentName?) {
+//                    Log.d("ScreenRecordingPlugin", "🔗 Service disconnected")
+//                }
+//            }
+//
+//            context.bindService(intentConnection, serviceConnection!!, Activity.BIND_AUTO_CREATE)
+//        }
+//
+//    } else {
+//        Log.e("ScreenRecordingPlugin", "❌ Screen capture permission DENIED")
+//        Log.e("ScreenRecordingPlugin", "Result code: $resultCode, Data: $data")
+//
+//        if (mScreenShareCallback != null) {
+//            mScreenShareCallback?.error("PERMISSION_DENIED", "Screen capture permission denied", null)
+//        } else {
+//            _result?.success(false)
+//        }
+//    }
+//}
+ // test binding failure can be removed after testing
 private fun handleScreenCaptureResult(resultCode: Int, data: Intent) {
+    Log.d("ScreenRecordingPlugin", "=== HANDLE SCREEN CAPTURE RESULT ===")
+    Log.d("ScreenRecordingPlugin", "Result code: $resultCode")
+
     val context = pluginBinding!!.applicationContext
 
-    
-    if (mScreenShareCallback != null) {
-        
-        ForegroundService.startService(context, mTitle, mMessage, true) 
-        val intentConnection = Intent(context, ForegroundService::class.java)
+    if (resultCode == Activity.RESULT_OK && data != null) {
+        Log.d("ScreenRecordingPlugin", "✅ Screen capture permission GRANTED")
 
-        serviceConnection = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                try {
-                    startScreenShareCapture(resultCode, data)
-                } catch (e: Throwable) {
-                    Log.e("ScreenRecordingPlugin", "Error: ${e.message}")
-                    mScreenShareCallback?.success(false)
-                }
-            }
+        if (mScreenShareCallback != null && currentCastSession?.isConnected == true) {
+            Log.d("ScreenRecordingPlugin", "🎬 This is for CASTING - diagnosing service binding")
 
-            override fun onServiceDisconnected(name: ComponentName?) {
+            try {
+                // Diagnose the service binding issue
+                diagnoseServiceBinding(context, resultCode, data)
+
+            } catch (e: Exception) {
+                Log.e("ScreenRecordingPlugin", "❌ Error in service diagnosis: ${e.message}")
+                e.printStackTrace()
+                mScreenShareCallback?.error("SERVICE_DIAGNOSIS_ERROR", e.message, null)
             }
         }
-
-        context.bindService(
-            intentConnection,
-            serviceConnection!!,
-            Activity.BIND_AUTO_CREATE
-        )
-    } else {
-        
-        ForegroundService.startService(context, mTitle, mMessage, true) 
-        val intentConnection = Intent(context, ForegroundService::class.java)
-
-        serviceConnection = object : ServiceConnection {
-            override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
-                try {
-                    startRecordScreen()
-                    mMediaProjectionCallback = MediaProjectionCallback()
-                    mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
-                    mMediaProjection?.registerCallback(mMediaProjectionCallback as MediaProjection.Callback, null)
-                    mVirtualDisplay = createVirtualDisplay()
-                    _result.success(true)
-                } catch (e: Throwable) {
-                    Log.e("ScreenRecordingPlugin", "Error: ${e.message}")
-                    _result.success(false)
-                }
-            }
-
-            override fun onServiceDisconnected(name: ComponentName?) {
-            }
-        }
-
-        context.bindService(
-            intentConnection,
-            serviceConnection!!,
-            Activity.BIND_AUTO_CREATE
-        )
     }
 }
 
+    private fun diagnoseServiceBinding(context: Context, resultCode: Int, data: Intent) {
+        Log.d("ScreenRecordingPlugin", "=== SERVICE BINDING DIAGNOSIS ===")
 
-    
+        // Check 1: Context type
+        Log.d("ScreenRecordingPlugin", "Context type: ${context.javaClass.simpleName}")
+        Log.d("ScreenRecordingPlugin", "Context package: ${context.packageName}")
+
+        // Check 2: Service class exists
+        try {
+            val serviceClass = Class.forName("com.isvisoft.flutter_screen_recording.ForegroundService")
+            Log.d("ScreenRecordingPlugin", "✅ Service class found: $serviceClass")
+        } catch (e: ClassNotFoundException) {
+            Log.e("ScreenRecordingPlugin", "❌ Service class NOT found: ${e.message}")
+
+            // Try alternative package name
+            try {
+                val altServiceClass = Class.forName("${context.packageName}.ForegroundService")
+                Log.d("ScreenRecordingPlugin", "✅ Alternative service class found: $altServiceClass")
+            } catch (e2: ClassNotFoundException) {
+                Log.e("ScreenRecordingPlugin", "❌ Alternative service class also NOT found: ${e2.message}")
+            }
+        }
+
+        // Check 3: Try different intent approaches
+        Log.d("ScreenRecordingPlugin", "Testing different intent approaches...")
+
+        // Approach 1: Explicit intent with full class name
+        testServiceBinding1(context, resultCode, data)
+    }
+
+    private fun testServiceBinding1(context: Context, resultCode: Int, data: Intent) {
+        Log.d("ScreenRecordingPlugin", "=== TESTING SERVICE BINDING APPROACH 1 ===")
+
+        try {
+            // Start service first
+            ForegroundService.startService(context, "Screen Casting", "Casting screen to TV", true)
+
+            // Wait for service to start
+            Handler(android.os.Looper.getMainLooper()).postDelayed({
+                // Try explicit intent with full package name
+                val intentConnection = Intent(context, ForegroundService::class.java)
+                Log.d("ScreenRecordingPlugin", "Intent component: ${intentConnection.component}")
+                Log.d("ScreenRecordingPlugin", "Intent package: ${intentConnection.`package`}")
+
+                serviceConnection = object : ServiceConnection {
+                    override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                        Log.d("ScreenRecordingPlugin", "🔗 *** SERVICE CONNECTED (APPROACH 1) ***")
+                        handleServiceConnected(service, resultCode, data)
+                    }
+
+                    override fun onServiceDisconnected(name: ComponentName?) {
+                        Log.d("ScreenRecordingPlugin", "🔗 Service disconnected (approach 1)")
+                    }
+
+                    override fun onBindingDied(name: ComponentName?) {
+                        Log.e("ScreenRecordingPlugin", "❌ Binding died (approach 1): $name")
+                        testServiceBinding2(context, resultCode, data)
+                    }
+
+                    override fun onNullBinding(name: ComponentName?) {
+                        Log.e("ScreenRecordingPlugin", "❌ Null binding (approach 1): $name")
+                        testServiceBinding2(context, resultCode, data)
+                    }
+                }
+
+                val bindResult = context.bindService(
+                    intentConnection,
+                    serviceConnection!!,
+                    Context.BIND_AUTO_CREATE or Context.BIND_IMPORTANT
+                )
+
+                Log.d("ScreenRecordingPlugin", "Approach 1 bind result: $bindResult")
+
+                if (!bindResult) {
+                    Log.e("ScreenRecordingPlugin", "❌ Approach 1 failed, trying approach 2...")
+                    testServiceBinding2(context, resultCode, data)
+                }
+
+            }, 1000)
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error in approach 1: ${e.message}")
+            testServiceBinding2(context, resultCode, data)
+        }
+    }
+
+    private fun testServiceBinding2(context: Context, resultCode: Int, data: Intent) {
+        Log.d("ScreenRecordingPlugin", "=== TESTING SERVICE BINDING APPROACH 2 ===")
+
+        try {
+            // Try with explicit component name
+            val componentName = ComponentName(context, ForegroundService::class.java)
+            val intentConnection = Intent().apply {
+                component = componentName
+            }
+
+            Log.d("ScreenRecordingPlugin", "Explicit component: $componentName")
+
+            serviceConnection = object : ServiceConnection {
+                override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                    Log.d("ScreenRecordingPlugin", "🔗 *** SERVICE CONNECTED (APPROACH 2) ***")
+                    handleServiceConnected(service, resultCode, data)
+                }
+
+                override fun onServiceDisconnected(name: ComponentName?) {
+                    Log.d("ScreenRecordingPlugin", "🔗 Service disconnected (approach 2)")
+                }
+
+                override fun onBindingDied(name: ComponentName?) {
+                    Log.e("ScreenRecordingPlugin", "❌ Binding died (approach 2): $name")
+                    testServiceBinding3(context, resultCode, data)
+                }
+
+                override fun onNullBinding(name: ComponentName?) {
+                    Log.e("ScreenRecordingPlugin", "❌ Null binding (approach 2): $name")
+                    testServiceBinding3(context, resultCode, data)
+                }
+            }
+
+            val bindResult = context.bindService(
+                intentConnection,
+                serviceConnection!!,
+                Context.BIND_AUTO_CREATE
+            )
+
+            Log.d("ScreenRecordingPlugin", "Approach 2 bind result: $bindResult")
+
+            if (!bindResult) {
+                Log.e("ScreenRecordingPlugin", "❌ Approach 2 failed, trying approach 3...")
+                testServiceBinding3(context, resultCode, data)
+            }
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error in approach 2: ${e.message}")
+            testServiceBinding3(context, resultCode, data)
+        }
+    }
+
+    private fun testServiceBinding3(context: Context, resultCode: Int, data: Intent) {
+        Log.d("ScreenRecordingPlugin", "=== TESTING SERVICE BINDING APPROACH 3 (DIRECT) ===")
+
+        try {
+            // If binding fails, fall back to direct approach
+            Log.d("ScreenRecordingPlugin", "All binding approaches failed, using direct MediaProjection creation")
+
+            Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try {
+                    Log.d("ScreenRecordingPlugin", "📱 Creating MediaProjection directly...")
+                    mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
+                    Log.d("ScreenRecordingPlugin", "✅ MediaProjection created successfully: $mMediaProjection")
+
+                    startCastingWithPermissionDirectly()
+
+                } catch (e: Exception) {
+                    Log.e("ScreenRecordingPlugin", "❌ Direct MediaProjection creation failed: ${e.message}")
+                    e.printStackTrace()
+                    mScreenShareCallback?.error("MEDIA_PROJECTION_ERROR", e.message, null)
+                }
+            }, 500)
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error in approach 3: ${e.message}")
+            e.printStackTrace()
+            mScreenShareCallback?.error("ALL_APPROACHES_FAILED", e.message, null)
+        }
+    }
+
+    private fun handleServiceConnected(service: IBinder?, resultCode: Int, data: Intent) {
+        Log.d("ScreenRecordingPlugin", "=== HANDLING SERVICE CONNECTED ===")
+        Log.d("ScreenRecordingPlugin", "Service IBinder: $service")
+
+        try {
+            Log.d("ScreenRecordingPlugin", "Creating MediaProjection in service context...")
+            mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
+            Log.d("ScreenRecordingPlugin", "✅ MediaProjection created successfully: $mMediaProjection")
+
+            startCastingWithPermissionDirectly()
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error creating MediaProjection in service: ${e.message}")
+            e.printStackTrace()
+            mScreenShareCallback?.error("MEDIA_PROJECTION_ERROR", e.message, null)
+        }
+    }
+
+
+    // New method to start casting directly after permission is granted
+    private fun startCastingWithPermissionDirectly() {
+        try {
+            Log.d("ScreenRecordingPlugin", "=== STARTING CASTING WITH PERMISSION DIRECTLY ===")
+            Log.d("ScreenRecordingPlugin", "MediaProjection: $mMediaProjection")
+            Log.d("ScreenRecordingPlugin", "Cast session: ${currentCastSession?.castDevice?.friendlyName}")
+            Log.d("ScreenRecordingPlugin", "Cast session connected: ${currentCastSession?.isConnected}")
+
+            if (mMediaProjection == null) {
+                Log.e("ScreenRecordingPlugin", "❌ MediaProjection is STILL null!")
+                mScreenShareCallback?.error("NO_MEDIA_PROJECTION", "Failed to get screen capture", null)
+                return
+            }
+
+            if (currentCastSession?.isConnected != true) {
+                Log.e("ScreenRecordingPlugin", "❌ Cast session not connected!")
+                mScreenShareCallback?.error("NO_CAST_SESSION", "Cast session lost", null)
+                return
+            }
+
+            // Setup casting infrastructure
+            Log.d("ScreenRecordingPlugin", "🧵 Setting up casting thread...")
+            castThread = HandlerThread("CastingThread")
+            castThread?.start()
+            castHandler = Handler(castThread!!.looper)
+            Log.d("ScreenRecordingPlugin", "✅ Casting thread created")
+
+            // Setup screen capture
+            Log.d("ScreenRecordingPlugin", "📱 Setting up screen capture...")
+            setupScreenCastCapture()
+
+            // Setup cast communication
+            Log.d("ScreenRecordingPlugin", "📡 Setting up cast channel...")
+            setupCastChannel()
+
+            // Send initial test message
+            Log.d("ScreenRecordingPlugin", "📨 Sending test message...")
+            sendTestMessage()
+
+            // Mark as casting
+            isCasting = true
+            Log.d("ScreenRecordingPlugin", "✅ Casting started successfully!")
+
+            // Notify success
+            mScreenShareCallback?.success(true)
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error in casting flow: ${e.message}")
+            e.printStackTrace()
+            mScreenShareCallback?.error("CASTING_FLOW_ERROR", e.message, null)
+        }
+    }
+
+
+
     override fun onMethodCall(call: MethodCall, result: Result) {
         val appContext = pluginBinding!!.applicationContext
 
@@ -920,6 +1282,8 @@ private fun startCasting(result: Result) {
                     null
                 )
             }
+           // CRITICAL: Return here! Don't continue execution
+            Log.d("ScreenRecordingPlugin", "⏸️ Waiting for permission result...")
             return
         }
 
@@ -963,34 +1327,45 @@ private fun startCasting(result: Result) {
 
     private fun startCastingWithPermission(result: Result) {
         try {
-            Log.d("ScreenRecordingPlugin", "=== START CASTING WITH PERMISSION ===")
+            Log.d("ScreenRecordingPlugin", "=== START CASTING WITH PERMISSION DEBUG ===")
             Log.d("ScreenRecordingPlugin", "MediaProjection available: $mMediaProjection")
             Log.d("ScreenRecordingPlugin", "Cast session: ${currentCastSession?.castDevice?.friendlyName}")
+            Log.d("ScreenRecordingPlugin", "Cast session connected: ${currentCastSession?.isConnected}")
 
-            
+            if (mMediaProjection == null) {
+                Log.e("ScreenRecordingPlugin", "❌ MediaProjection is null!")
+                result.error("NO_MEDIA_PROJECTION", "Screen capture permission not available", null)
+                return
+            }
+
+            if (currentCastSession == null || !currentCastSession!!.isConnected) {
+                Log.e("ScreenRecordingPlugin", "❌ No active cast session!")
+                result.error("NO_CAST_SESSION", "Cast session not available", null)
+                return
+            }
+
+            // Setup casting thread
             Log.d("ScreenRecordingPlugin", "🧵 Setting up casting thread...")
             castThread = HandlerThread("CastingThread")
             castThread?.start()
             castHandler = Handler(castThread!!.looper)
             Log.d("ScreenRecordingPlugin", "✅ Casting thread created")
 
-            
+            // Setup screen capture
             Log.d("ScreenRecordingPlugin", "📱 Setting up screen capture...")
             setupScreenCastCapture()
 
-            
-            Log.d("ScreenRecordingPlugin", "🖥️ Setting up presentation display...")
-            setupPresentationDisplay()
-
-            
+            // Setup cast channel
             Log.d("ScreenRecordingPlugin", "📡 Setting up cast channel...")
             setupCastChannel()
 
-            
-            Log.d("ScreenRecordingPlugin", "🎬 Starting screen streaming...")
+            // Start casting flag
             isCasting = true
-
             Log.d("ScreenRecordingPlugin", "✅ Casting started successfully!")
+
+            // Send test message
+            sendTestMessage()
+
             result.success(true)
 
         } catch (e: Exception) {
@@ -1000,63 +1375,148 @@ private fun startCasting(result: Result) {
         }
     }
 
-    
+
+    // 6. Send test message to verify communication
+    private fun sendTestMessage() {
+        try {
+            Log.d("ScreenRecordingPlugin", "📡 Sending test message to receiver...")
+
+            val testMessage = """
+            {
+                "type": "test",
+                "message": "Hello from Android!",
+                "timestamp": ${System.currentTimeMillis()}
+            }
+        """.trimIndent()
+
+            currentCastSession?.sendMessage(
+                "urn:x-cast:com.isvisoft.flutter_screen_recording",
+                testMessage
+            )?.setResultCallback { result ->
+                if (result.status.isSuccess) {
+                    Log.d("ScreenRecordingPlugin", "✅ Test message sent successfully")
+                } else {
+                    Log.e("ScreenRecordingPlugin", "❌ Test message failed: ${result.status}")
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "Error sending test message: ${e.message}")
+        }
+    }
+
+
     private fun setupScreenCastCapture() {
         try {
-            val context = pluginBinding!!.applicationContext
-            Log.d("ScreenRecordingPlugin", "Creating ImageReader: ${mDisplayWidth}x${mDisplayHeight}")
-            
+            Log.d("ScreenRecordingPlugin", "=== DETAILED SCREEN CAPTURE SETUP ===")
+
+            if (mMediaProjection == null) {
+                Log.e("ScreenRecordingPlugin", "❌ MediaProjection is null in setup")
+                return
+            }
+
+            Log.d("ScreenRecordingPlugin", "Original resolution: ${mDisplayWidth}x${mDisplayHeight}")
+            Log.d("ScreenRecordingPlugin", "Screen density: $mScreenDensity")
+
+            // Use smaller resolution for better performance
+            val captureWidth = 640  // Fixed smaller size for testing
+            val captureHeight = 480
+
+            Log.d("ScreenRecordingPlugin", "Using capture resolution: ${captureWidth}x${captureHeight}")
+
+            // Create ImageReader
             castImageReader = ImageReader.newInstance(
-                mDisplayWidth,
-                mDisplayHeight,
+                captureWidth,
+                captureHeight,
                 PixelFormat.RGBA_8888,
                 2
             )
+            Log.d("ScreenRecordingPlugin", "✅ ImageReader created: $castImageReader")
 
-            
+            // Set up image listener with detailed logging
             castImageReader?.setOnImageAvailableListener({ reader ->
-                Log.d("ScreenRecordingPlugin", "📸 Image available for casting")
+                Log.d("ScreenRecordingPlugin", "📸 *** IMAGE AVAILABLE FOR CASTING! ***")
+
                 val image = reader.acquireLatestImage()
-                image?.let {
+                if (image != null && isCasting) {
+                    Log.d("ScreenRecordingPlugin", "✅ Processing image: ${image.width}x${image.height}")
+
                     castHandler?.post {
-                        processAndSendScreenFrame(it)
+                        try {
+                            // For now, just send a test message to verify the flow works
+                            sendTestMessage()
+                        } catch (e: Exception) {
+                            Log.e("ScreenRecordingPlugin", "❌ Error processing image: ${e.message}")
+                        } finally {
+                            image.close()
+                        }
                     }
-                    it.close()
+                } else {
+                    Log.w("ScreenRecordingPlugin", "⚠️ Image null or not casting")
+                    image?.close()
                 }
             }, castHandler)
 
-            Log.d("ScreenRecordingPlugin", "Creating virtual display for casting...")
-            
+            Log.d("ScreenRecordingPlugin", "✅ ImageReader listener set")
+
+            // Create virtual display
+            Log.d("ScreenRecordingPlugin", "Creating virtual display...")
+
             castVirtualDisplay = mMediaProjection?.createVirtualDisplay(
                 "ScreenCast",
-                mDisplayWidth,
-                mDisplayHeight,
+                captureWidth,
+                captureHeight,
                 mScreenDensity,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
                 castImageReader?.surface,
                 object : VirtualDisplay.Callback() {
                     override fun onPaused() {
-                        Log.d("ScreenRecordingPlugin", "Cast display paused")
+                        Log.d("ScreenRecordingPlugin", "🔄 Virtual display PAUSED")
                     }
 
                     override fun onResumed() {
-                        Log.d("ScreenRecordingPlugin", "Cast display resumed")
+                        Log.d("ScreenRecordingPlugin", "▶️ Virtual display RESUMED")
                     }
 
                     override fun onStopped() {
-                        Log.d("ScreenRecordingPlugin", "Cast display stopped")
+                        Log.d("ScreenRecordingPlugin", "⏹️ Virtual display STOPPED")
                     }
                 },
                 castHandler
             )
-            Log.d("ScreenRecordingPlugin", "✅ Screen cast capture setup complete")
 
+            if (castVirtualDisplay != null) {
+                Log.d("ScreenRecordingPlugin", "✅ *** VIRTUAL DISPLAY CREATED SUCCESSFULLY! ***")
+                Log.d("ScreenRecordingPlugin", "Virtual display: ${castVirtualDisplay?.display}")
+            } else {
+                Log.e("ScreenRecordingPlugin", "❌ FAILED to create virtual display!")
+            }
 
         } catch (e: Exception) {
-            Log.e("ScreenRecordingPlugin", "Error setting up cast capture: ${e.message}")
+            Log.e("ScreenRecordingPlugin", "❌ Error in detailed screen capture setup: ${e.message}")
+            e.printStackTrace()
         }
     }
 
+    // Send control messages to receiver
+    private fun sendControlMessage(action: String) {
+        try {
+            val message = """
+            {
+                "type": "control",
+                "action": "$action",
+                "timestamp": ${System.currentTimeMillis()}
+            }
+        """.trimIndent()
+
+            currentCastSession?.sendMessage(
+                "urn:x-cast:com.isvisoft.flutter_screen_recording",
+                message
+            )
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "Error sending control message: ${e.message}")
+        }
+    }
     
     private fun setupPresentationDisplay() {
         try {
@@ -1093,35 +1553,60 @@ private fun startCasting(result: Result) {
     
     private fun setupCastChannel() {
         try {
+            Log.d("ScreenRecordingPlugin", "=== DETAILED CAST CHANNEL SETUP ===")
+
             currentCastSession?.setMessageReceivedCallbacks(
                 "urn:x-cast:com.isvisoft.flutter_screen_recording",
                 Cast.MessageReceivedCallback { castDevice, namespace, message ->
-                    Log.d("ScreenRecordingPlugin", "Received cast message: $message")
-                    
+                    Log.d("ScreenRecordingPlugin", "📨 *** MESSAGE RECEIVED FROM RECEIVER ***")
+                    Log.d("ScreenRecordingPlugin", "Message: $message")
                 }
             )
+
+            Log.d("ScreenRecordingPlugin", "✅ Cast channel setup complete")
+
         } catch (e: Exception) {
-            Log.e("ScreenRecordingPlugin", "Error setting up cast channel: ${e.message}")
+            Log.e("ScreenRecordingPlugin", "❌ Error setting up cast channel: ${e.message}")
+            e.printStackTrace()
         }
     }
 
     
     private fun processAndSendScreenFrame(image: Image) {
         try {
-            Log.d("ScreenRecordingPlugin", "📷 Processing screen frame...")
+            Log.d("ScreenRecordingPlugin", "=== PROCESSING SCREEN FRAME ===")
+            Log.d("ScreenRecordingPlugin", "Image format: ${image.format}")
+            Log.d("ScreenRecordingPlugin", "Image size: ${image.width}x${image.height}")
+            Log.d("ScreenRecordingPlugin", "Image planes: ${image.planes.size}")
 
-            
-            val bitmap = imageToBitmap(image)
+            // Convert image to bitmap
+            val bitmap = imageToBitmapOptimized(image)
+            if (bitmap == null) {
+                Log.e("ScreenRecordingPlugin", "❌ Failed to create bitmap")
+                return
+            }
+
             Log.d("ScreenRecordingPlugin", "Bitmap created: ${bitmap.width}x${bitmap.height}")
 
-            
+            // Compress bitmap
             val outputStream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
+            val compressed = bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
+
+            if (!compressed) {
+                Log.e("ScreenRecordingPlugin", "❌ Failed to compress bitmap")
+                bitmap.recycle()
+                return
+            }
+
             val imageData = outputStream.toByteArray()
             Log.d("ScreenRecordingPlugin", "Image compressed: ${imageData.size} bytes")
 
-            
+            // Send to cast device
             sendImageToCastDevice(imageData)
+
+            // Cleanup
+            bitmap.recycle()
+            outputStream.close()
 
         } catch (e: Exception) {
             Log.e("ScreenRecordingPlugin", "❌ Error processing screen frame: ${e.message}")
@@ -1129,46 +1614,134 @@ private fun startCasting(result: Result) {
         }
     }
 
-    
-    private fun imageToBitmap(image: Image): Bitmap {
-        val planes = image.planes
-        val buffer = planes[0].buffer
-        val pixelStride = planes[0].pixelStride
-        val rowStride = planes[0].rowStride
-        val rowPadding = rowStride - pixelStride * image.width
+    // Optimized bitmap conversion
+    private fun imageToBitmapOptimized(image: Image): Bitmap? {
+        return try {
+            Log.d("ScreenRecordingPlugin", "=== CONVERTING IMAGE TO BITMAP ===")
 
-        val bitmap = Bitmap.createBitmap(
-            image.width + rowPadding / pixelStride,
-            image.height,
-            Bitmap.Config.ARGB_8888
-        )
-        bitmap.copyPixelsFromBuffer(buffer)
+            val planes = image.planes
+            Log.d("ScreenRecordingPlugin", "Planes count: ${planes.size}")
 
-        return if (rowPadding == 0) {
-            bitmap
-        } else {
-            Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
+            if (planes.isEmpty()) {
+                Log.e("ScreenRecordingPlugin", "❌ No image planes available")
+                return null
+            }
+
+            val buffer = planes[0].buffer
+            val pixelStride = planes[0].pixelStride
+            val rowStride = planes[0].rowStride
+            val rowPadding = rowStride - pixelStride * image.width
+
+            Log.d("ScreenRecordingPlugin", "PixelStride: $pixelStride, RowStride: $rowStride, RowPadding: $rowPadding")
+
+            val bitmap = Bitmap.createBitmap(
+                image.width + rowPadding / pixelStride,
+                image.height,
+                Bitmap.Config.ARGB_8888
+            )
+
+            bitmap.copyPixelsFromBuffer(buffer)
+
+            val finalBitmap = if (rowPadding == 0) {
+                bitmap
+            } else {
+                val croppedBitmap = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
+                bitmap.recycle()
+                croppedBitmap
+            }
+
+            Log.d("ScreenRecordingPlugin", "✅ Bitmap conversion successful")
+            finalBitmap
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error converting image to bitmap: ${e.message}")
+            e.printStackTrace()
+            null
+        }
+    }
+
+
+    // Enhanced image sending with chunking support
+    private fun sendImageInChunks(imageData: ByteArray) {
+        try {
+            val chunkSize = 30000 // 30KB chunks
+            val totalChunks = (imageData.size + chunkSize - 1) / chunkSize
+            val frameId = System.currentTimeMillis().toString()
+
+            for (i in 0 until totalChunks) {
+                val start = i * chunkSize
+                val end = minOf(start + chunkSize, imageData.size)
+                val chunk = imageData.sliceArray(start until end)
+                val base64Chunk = Base64.encodeToString(chunk, Base64.NO_WRAP)
+
+                val message = """
+                {
+                    "type": "screen_frame_chunk",
+                    "frameId": "$frameId",
+                    "chunkIndex": $i,
+                    "totalChunks": $totalChunks,
+                    "data": "$base64Chunk",
+                    "timestamp": ${System.currentTimeMillis()}
+                }
+            """.trimIndent()
+
+                currentCastSession?.sendMessage(
+                    "urn:x-cast:com.isvisoft.flutter_screen_recording",
+                    message
+                )?.setResultCallback { result ->
+                    if (!result.status.isSuccess) {
+                        Log.e("ScreenRecordingPlugin", "Failed to send chunk $i: ${result.status}")
+                    }
+                }
+
+                // Small delay between chunks to avoid overwhelming
+                Thread.sleep(5)
+            }
+
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "Error sending chunked image: ${e.message}")
         }
     }
 
     
     private fun sendImageToCastDevice(imageData: ByteArray) {
         try {
-            Log.d("ScreenRecordingPlugin", "📡 Sending image to cast device...")
+            Log.d("ScreenRecordingPlugin", "=== SENDING IMAGE TO CAST DEVICE ===")
+            Log.d("ScreenRecordingPlugin", "Image data size: ${imageData.size} bytes")
 
             val base64Image = Base64.encodeToString(imageData, Base64.NO_WRAP)
-            val message = """{"type":"screen_frame","data":"$base64Image","timestamp":${System.currentTimeMillis()}}"""
+            Log.d("ScreenRecordingPlugin", "Base64 encoded size: ${base64Image.length} characters")
+
+            val message = """
+            {
+                "type": "screen_frame",
+                "data": "$base64Image",
+                "timestamp": ${System.currentTimeMillis()},
+                "width": $mDisplayWidth,
+                "height": $mDisplayHeight
+            }
+        """.trimIndent()
 
             Log.d("ScreenRecordingPlugin", "Message size: ${message.length} characters")
+            Log.d("ScreenRecordingPlugin", "Sending to namespace: urn:x-cast:com.isvisoft.flutter_screen_recording")
 
-            currentCastSession?.sendMessage("urn:x-cast:com.yourapp.screencast", message)
-                ?.setResultCallback { result ->
+            if (currentCastSession?.isConnected == true) {
+                currentCastSession?.sendMessage(
+                    "urn:x-cast:com.isvisoft.flutter_screen_recording",
+                    message
+                )?.setResultCallback { result ->
                     if (result.status.isSuccess) {
-                        Log.d("ScreenRecordingPlugin", "✅ Screen data sent successfully")
+                        Log.d("ScreenRecordingPlugin", "✅ Screen frame sent successfully")
                     } else {
-                        Log.e("ScreenRecordingPlugin", "❌ Failed to send screen data: ${result.status}")
+                        Log.e("ScreenRecordingPlugin", "❌ Failed to send screen frame: ${result.status}")
+                        Log.e("ScreenRecordingPlugin", "Status code: ${result.status.statusCode}")
+                        Log.e("ScreenRecordingPlugin", "Status message: ${result.status.statusMessage}")
                     }
                 }
+            } else {
+                Log.e("ScreenRecordingPlugin", "❌ Cast session not connected!")
+            }
+
         } catch (e: Exception) {
             Log.e("ScreenRecordingPlugin", "❌ Error sending screen data: ${e.message}")
             e.printStackTrace()

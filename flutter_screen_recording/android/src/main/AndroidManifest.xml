@@ -31,5 +31,6 @@
             android:foregroundServiceType="mediaProjection">
         </service>
 
+
     </application>
 </manifest>
