@@ -349,46 +349,84 @@ class FlutterScreenRecordingPlugin :
             isRequestingCastingPermission = false
 
             try {
-                // 🔥 KEY FIX: Start foreground service for casting
+                // Start foreground service for casting
                 Log.d("ScreenRecordingPlugin", "🚀 Starting foreground service for casting...")
                 ForegroundService.startService(context, mTitle, mMessage, true)
 
+                Log.d("ScreenRecordingPlugin", "✅ Foreground service start command sent")
+
                 val intentConnection = Intent(context, ForegroundService::class.java)
+                Log.d("ScreenRecordingPlugin", "🔗 Created service intent: $intentConnection")
 
                 serviceConnection = object : ServiceConnection {
                     override fun onServiceConnected(name: ComponentName?, service: IBinder?) {
+                        Log.d("ScreenRecordingPlugin", "🎉 FOREGROUND SERVICE CONNECTED!")
+                        Log.d("ScreenRecordingPlugin", "Service component: $name")
+                        Log.d("ScreenRecordingPlugin", "Service binder: $service")
+
                         try {
-                            Log.d("ScreenRecordingPlugin", "✅ Foreground service connected, creating MediaProjection...")
+                            Log.d(
+                                "ScreenRecordingPlugin",
+                                "🎬 Creating MediaProjection for casting..."
+                            )
 
                             // Create MediaProjection for casting
-                            mMediaProjection = mProjectionManager.getMediaProjection(resultCode, data)
+                            mMediaProjection =
+                                mProjectionManager.getMediaProjection(resultCode, data)
 
-                            Log.d("ScreenRecordingPlugin", "✅ MediaProjection created: $mMediaProjection")
+                            Log.d(
+                                "ScreenRecordingPlugin",
+                                "✅ MediaProjection created successfully: $mMediaProjection"
+                            )
 
                             // Now start the actual casting process
+                            Log.d("ScreenRecordingPlugin", "🎯 Starting casting with permission...")
                             startCastingWithPermission(_result)
 
                         } catch (e: Exception) {
-                            Log.e("ScreenRecordingPlugin", "❌ Error starting casting after service connection: ${e.message}")
+                            Log.e(
+                                "ScreenRecordingPlugin",
+                                "❌ Error in service connected callback: ${e.message}"
+                            )
                             e.printStackTrace()
                             _result.error("CAST_SERVICE_ERROR", e.message, null)
                         }
                     }
 
                     override fun onServiceDisconnected(name: ComponentName?) {
-                        Log.d("ScreenRecordingPlugin", "Foreground service disconnected")
+                        Log.d("ScreenRecordingPlugin", "⚠️ Foreground service disconnected: $name")
                     }
                 }
 
-                // Bind to the service
-                context.bindService(
+                Log.d("ScreenRecordingPlugin", "🔗 Attempting to bind to service...")
+
+                val bindResult = context.bindService(
                     intentConnection,
                     serviceConnection!!,
                     Activity.BIND_AUTO_CREATE
                 )
 
+                Log.d("ScreenRecordingPlugin", "🔗 Service bind result: $bindResult")
+
+                if (!bindResult) {
+                    Log.e("ScreenRecordingPlugin", "❌ Failed to bind to service!")
+                    _result.error(
+                        "SERVICE_BIND_FAILED",
+                        "Could not bind to foreground service",
+                        null
+                    )
+                } else {
+                    Log.d(
+                        "ScreenRecordingPlugin",
+                        "✅ Service bind request successful, waiting for connection..."
+                    )
+                }
+
             } catch (e: Exception) {
-                Log.e("ScreenRecordingPlugin", "❌ Error starting foreground service for casting: ${e.message}")
+                Log.e(
+                    "ScreenRecordingPlugin",
+                    "❌ Error starting foreground service for casting: ${e.message}"
+                )
                 e.printStackTrace()
                 _result.error("CAST_PERMISSION_ERROR", e.message, null)
             }
@@ -936,38 +974,51 @@ class FlutterScreenRecordingPlugin :
 
     private fun startCastingWithPermission(result: Result) {
         try {
-            Log.d("ScreenRecordingPlugin", "=== START CASTING WITH PERMISSION ===")
+            Log.d("ScreenRecordingPlugin", "🎬 ===============================")
+            Log.d("ScreenRecordingPlugin", "🎬 START CASTING WITH PERMISSION")
+            Log.d("ScreenRecordingPlugin", "🎬 ===============================")
+
             Log.d("ScreenRecordingPlugin", "MediaProjection available: $mMediaProjection")
             Log.d("ScreenRecordingPlugin", "Cast session: ${currentCastSession?.castDevice?.friendlyName}")
 
-            
+            if (mMediaProjection == null) {
+                Log.e("ScreenRecordingPlugin", "❌ MediaProjection is null in startCastingWithPermission!")
+                result.error("NO_MEDIA_PROJECTION", "MediaProjection is null", null)
+                return
+            }
+
+            if (currentCastSession == null || !currentCastSession!!.isConnected) {
+                Log.e("ScreenRecordingPlugin", "❌ Cast session is null or not connected in startCastingWithPermission!")
+                result.error("NO_CAST_SESSION", "Cast session not available", null)
+                return
+            }
+
             Log.d("ScreenRecordingPlugin", "🧵 Setting up casting thread...")
             castThread = HandlerThread("CastingThread")
             castThread?.start()
             castHandler = Handler(castThread!!.looper)
-            Log.d("ScreenRecordingPlugin", "✅ Casting thread created")
+            Log.d("ScreenRecordingPlugin", "✅ Casting thread created: $castThread")
 
-            
             Log.d("ScreenRecordingPlugin", "📱 Setting up screen capture...")
             setupScreenCastCapture()
 
-            
             Log.d("ScreenRecordingPlugin", "🖥️ Setting up presentation display...")
             setupPresentationDisplay()
 
-            
             Log.d("ScreenRecordingPlugin", "📡 Setting up cast channel...")
             setupCastChannel()
 
-            
-            Log.d("ScreenRecordingPlugin", "🎬 Starting screen streaming...")
+            Log.d("ScreenRecordingPlugin", "🎬 Setting casting flags...")
             isCasting = true
 
-            Log.d("ScreenRecordingPlugin", "✅ Casting started successfully!")
+            Log.d("ScreenRecordingPlugin", "✅ CASTING STARTED SUCCESSFULLY!")
             result.success(true)
 
         } catch (e: Exception) {
-            Log.e("ScreenRecordingPlugin", "❌ Error in startCastingWithPermission: ${e.message}")
+            Log.e("ScreenRecordingPlugin", "💥 CRITICAL ERROR in startCastingWithPermission")
+            Log.e("ScreenRecordingPlugin", "Error type: ${e.javaClass.simpleName}")
+            Log.e("ScreenRecordingPlugin", "Error message: ${e.message}")
+            Log.e("ScreenRecordingPlugin", "Stack trace:")
             e.printStackTrace()
             result.error("CAST_START_ERROR", e.message, null)
         }

@@ -140,112 +140,160 @@
 //    }
 //}
 
-// Update your ForegroundService.kt file with this code:
-
 package com.isvisoft.flutter_screen_recording
 
-import android.app.*
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.os.Binder
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 
 class ForegroundService : Service() {
 
     companion object {
-        private const val CHANNEL_ID = "ScreenRecordingChannel"
-        private const val NOTIFICATION_ID = 1
+        private const val TAG = "ForegroundService"
+        private const val NOTIFICATION_ID = 1001
+        private const val CHANNEL_ID = "screen_recording_channel"
 
         fun startService(context: Context, title: String, message: String, isMediaProjection: Boolean = false) {
+            Log.d(TAG, "📞 startService called")
+            Log.d(TAG, "Context: $context")
+            Log.d(TAG, "Title: $title")
+            Log.d(TAG, "Message: $message")
+            Log.d(TAG, "Is media projection: $isMediaProjection")
+
             val intent = Intent(context, ForegroundService::class.java).apply {
                 putExtra("title", title)
                 putExtra("message", message)
                 putExtra("isMediaProjection", isMediaProjection)
             }
 
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    Log.d(TAG, "🚀 Starting foreground service (API 26+)")
+                    context.startForegroundService(intent)
+                } else {
+                    Log.d(TAG, "🚀 Starting regular service (API < 26)")
+                    context.startService(intent)
+                }
+                Log.d(TAG, "✅ Service start command sent successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "❌ Error starting service: ${e.message}")
+                e.printStackTrace()
             }
         }
 
         fun stopService(context: Context) {
+            Log.d(TAG, "🛑 Stopping service")
             val intent = Intent(context, ForegroundService::class.java)
             context.stopService(intent)
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
-
     override fun onCreate() {
         super.onCreate()
-        createNotificationChannel()
+        Log.d(TAG, "🎉 ForegroundService onCreate() called")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        Log.d(TAG, "🎯 ForegroundService onStartCommand() called")
+        Log.d(TAG, "Intent: $intent")
+        Log.d(TAG, "Flags: $flags")
+        Log.d(TAG, "Start ID: $startId")
+
         val title = intent?.getStringExtra("title") ?: "Screen Recording"
         val message = intent?.getStringExtra("message") ?: "Recording in progress"
         val isMediaProjection = intent?.getBooleanExtra("isMediaProjection", false) ?: false
 
-        val notification = createNotification(title, message)
+        Log.d(TAG, "Extracted title: $title")
+        Log.d(TAG, "Extracted message: $message")
+        Log.d(TAG, "Is media projection: $isMediaProjection")
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isMediaProjection) {
-            // For Android 10+ with media projection (casting/screen sharing)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                // Android 14+ (API 34+)
-                startForeground(
-                    NOTIFICATION_ID,
-                    notification,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                )
+        try {
+            Log.d(TAG, "📱 Creating notification channel...")
+            createNotificationChannel()
+
+            Log.d(TAG, "🔔 Creating notification...")
+            val notification = createNotification(title, message)
+
+            Log.d(TAG, "🚀 Starting foreground with notification...")
+
+            // Start foreground service with correct type
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && isMediaProjection) {
+                Log.d(TAG, "📱 Starting with MEDIA_PROJECTION type (API 29+)")
+                startForeground(NOTIFICATION_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
             } else {
-                // Android 10-13 (API 29-33)
+                Log.d(TAG, "📱 Starting with default type")
                 startForeground(NOTIFICATION_ID, notification)
             }
-        } else {
-            // For regular screen recording or older Android versions
-            startForeground(NOTIFICATION_ID, notification)
+
+            Log.d(TAG, "✅ Foreground service started successfully!")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error in onStartCommand: ${e.message}")
+            e.printStackTrace()
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
+    }
+
+    override fun onBind(intent: Intent?): IBinder {
+        Log.d(TAG, "🔗 ForegroundService onBind() called")
+        Log.d(TAG, "Bind intent: $intent")
+
+        // Return a simple binder
+        return object : Binder() {
+            fun getService(): ForegroundService = this@ForegroundService
+        }
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        Log.d(TAG, "🔓 ForegroundService onUnbind() called")
+        return super.onUnbind(intent)
+    }
+
+    override fun onDestroy() {
+        Log.d(TAG, "💀 ForegroundService onDestroy() called")
+        super.onDestroy()
     }
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Log.d(TAG, "Creating notification channel (API 26+)")
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 "Screen Recording Service",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Service for screen recording and casting"
-                setShowBadge(false)
+                description = "Screen recording and casting service"
             }
 
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             notificationManager.createNotificationChannel(channel)
+            Log.d(TAG, "✅ Notification channel created")
         }
     }
 
     private fun createNotification(title: String, message: String): Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            packageManager.getLaunchIntentForPackage(packageName),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
+        Log.d(TAG, "Creating notification with title: $title, message: $message")
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(message)
-            .setSmallIcon(android.R.drawable.ic_menu_camera) // You can replace with your own icon
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setSmallIcon(android.R.drawable.ic_media_play) // Use a system icon
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setShowWhen(false)
-            .build()
+            .setOngoing(true)
+            .build().also {
+                Log.d(TAG, "✅ Notification created successfully")
+            }
     }
 }
+
+
