@@ -67,51 +67,53 @@ class MethodChannelFlutterScreenRecording
   }
 
   // New casting methods
-  Future<bool> discoverCastDevices() async {
-    try {
-      return await _channel.invokeMethod<bool>('discoverCastDevices') ?? false;
-    } catch (e) {
-      print("discoverCastDevices error: $e");
-      return false;
-    }
-  }
 
-  Future<bool> connectToCastDevice(String deviceId) async {
-    try {
-      return await _channel.invokeMethod<bool>('connectToCastDevice', {
-        'deviceId': deviceId,
-      }) ?? false;
-    } catch (e) {
-      print("connectToCastDevice error: $e");
-      return false;
-    }
-  }
 
-  Future<bool> startCasting() async {
-    try {
-      final screenShareResult = await _channel.invokeMethod('startScreenShare');
-      if (screenShareResult != true) {
-        print('Failed to get screen share permission');
-        return false;
-      }
+  // Future<bool> discoverCastDevices() async {
+  //   try {
+  //     return await _channel.invokeMethod<bool>('discoverCastDevices') ?? false;
+  //   } catch (e) {
+  //     print("discoverCastDevices error: $e");
+  //     return false;
+  //   }
+  // }
 
-      // Small delay to ensure permission is processed
-      await Future.delayed(Duration(milliseconds: 500));
-      return await _channel.invokeMethod<bool>('startCasting') ?? false;
-    } catch (e) {
-      print("startCasting error: $e");
-      return false;
-    }
-  }
+  // Future<bool> connectToCastDevice(String deviceId) async {
+  //   try {
+  //     return await _channel.invokeMethod<bool>('connectToCastDevice', {
+  //       'deviceId': deviceId,
+  //     }) ?? false;
+  //   } catch (e) {
+  //     print("connectToCastDevice error: $e");
+  //     return false;
+  //   }
+  // }
 
-  Future<bool> stopCasting() async {
-    try {
-      return await _channel.invokeMethod<bool>('stopCasting') ?? false;
-    } catch (e) {
-      print("stopCasting error: $e");
-      return false;
-    }
-  }
+  // Future<bool> startCasting() async {
+  //   try {
+  //     final screenShareResult = await _channel.invokeMethod('startScreenShare');
+  //     if (screenShareResult != true) {
+  //       print('Failed to get screen share permission');
+  //       return false;
+  //     }
+  //
+  //     // Small delay to ensure permission is processed
+  //     await Future.delayed(Duration(milliseconds: 500));
+  //     return await _channel.invokeMethod<bool>('startCasting') ?? false;
+  //   } catch (e) {
+  //     print("startCasting error: $e");
+  //     return false;
+  //   }
+  // }
+  //
+  // Future<bool> stopCasting() async {
+  //   try {
+  //     return await _channel.invokeMethod<bool>('stopCasting') ?? false;
+  //   } catch (e) {
+  //     print("stopCasting error: $e");
+  //     return false;
+  //   }
+  // }
 
   // Add these methods to method_channel_flutter_screen_recording.dart
   Future<bool> startScreenShare() async {
@@ -132,7 +134,71 @@ class MethodChannelFlutterScreenRecording
     }
   }
 
-  //write a method to listen devices discovery
+  /// Start casting screen to connected cast device
+   Future<bool> startCasting() async {
+    print("📞 Plugin: startCasting method called");
+    try {
+      final bool result = await _channel.invokeMethod('startCasting');
+      print("📞 Plugin: Method channel returned: $result");
+      return result;
+    } on PlatformException catch (e) {
+      print("💥 Plugin: PlatformException in startCasting: ${e.code} - ${e.message}");
+      return false;
+    } catch (e) {
+      print("💥 Plugin: General exception in startCasting: $e");
+      return false;
+    }
+  }
+
+  /// Stop casting
+   Future<bool> stopCasting() async {
+    print("📞 Plugin: stopCasting method called");
+    try {
+      final bool result = await _channel.invokeMethod('stopCasting');
+      print("📞 Plugin: stopCasting returned: $result");
+      return result;
+    } on PlatformException catch (e) {
+      print("💥 Plugin: PlatformException in stopCasting: ${e.code} - ${e.message}");
+      return false;
+    } catch (e) {
+      print("💥 Plugin: General exception in stopCasting: $e");
+      return false;
+    }
+  }
+
+  /// Discover cast devices
+   Future<bool> discoverCastDevices() async {
+    print("📞 Plugin: discoverCastDevices method called");
+    try {
+      final bool result = await _channel.invokeMethod('discoverCastDevices');
+      print("📞 Plugin: discoverCastDevices returned: $result");
+      return result;
+    } on PlatformException catch (e) {
+      print("💥 Plugin: PlatformException in discoverCastDevices: ${e.code} - ${e.message}");
+      return false;
+    } catch (e) {
+      print("💥 Plugin: General exception in discoverCastDevices: $e");
+      return false;
+    }
+  }
+
+  /// Connect to cast device
+   Future<bool> connectToCastDevice(String deviceId) async {
+    print("📞 Plugin: connectToCastDevice method called with deviceId: $deviceId");
+    try {
+      final bool result = await _channel.invokeMethod('connectToCastDevice', {
+        'deviceId': deviceId,
+      });
+      print("📞 Plugin: connectToCastDevice returned: $result");
+      return result;
+    } on PlatformException catch (e) {
+      print("💥 Plugin: PlatformException in connectToCastDevice: ${e.code} - ${e.message}");
+      return false;
+    } catch (e) {
+      print("💥 Plugin: General exception in connectToCastDevice: $e");
+      return false;
+    }
+  }
 
 
   void dispose() {
