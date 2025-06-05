@@ -114,6 +114,7 @@ class FlutterScreenRecordingPlugin :
     private var castHandler: Handler? = null
     private var castThread: HandlerThread? = null
     private var isRequestingCastingPermission = false
+    private var castingMediaProjectionCallback: CastingMediaProjectionCallback? = null
 
     
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
@@ -1029,7 +1030,7 @@ class FlutterScreenRecordingPlugin :
         try {
             val context = pluginBinding!!.applicationContext
             Log.d("ScreenRecordingPlugin", "Creating ImageReader: ${mDisplayWidth}x${mDisplayHeight}")
-            
+
             castImageReader = ImageReader.newInstance(
                 mDisplayWidth,
                 mDisplayHeight,
@@ -1037,20 +1038,39 @@ class FlutterScreenRecordingPlugin :
                 2
             )
 
-            
+            // Set up image listener
             castImageReader?.setOnImageAvailableListener({ reader ->
                 Log.d("ScreenRecordingPlugin", "📸 Image available for casting")
-                val image = reader.acquireLatestImage()
-                image?.let {
-                    castHandler?.post {
-                        processAndSendScreenFrame(it)
+
+                try {
+                    val image = reader.acquireLatestImage()
+                    if (image != null) {
+                        Log.d("ScreenRecordingPlugin", "✅ Image acquired: ${image.width}x${image.height}")
+
+                        // Process the image IMMEDIATELY in the current thread
+                        processAndSendScreenFrame(image)
+
+                        // Close the image after processing
+                        image.close()
+                        Log.d("ScreenRecordingPlugin", "✅ Image processed and closed")
+                    } else {
+                        Log.w("ScreenRecordingPlugin", "⚠️ No image available from reader")
                     }
-                    it.close()
+                } catch (e: Exception) {
+                    Log.e("ScreenRecordingPlugin", "❌ Error handling image: ${e.message}")
+                    e.printStackTrace()
                 }
             }, castHandler)
 
+            Log.d("ScreenRecordingPlugin", "🔑 Registering MediaProjection callback...")
+
+            // CRITICAL FIX: Register callback BEFORE creating virtual display
+            castingMediaProjectionCallback = CastingMediaProjectionCallback()
+            mMediaProjection?.registerCallback(castingMediaProjectionCallback!!, castHandler)
+
+            Log.d("ScreenRecordingPlugin", "✅ MediaProjection callback registered")
             Log.d("ScreenRecordingPlugin", "Creating virtual display for casting...")
-            
+
             castVirtualDisplay = mMediaProjection?.createVirtualDisplay(
                 "ScreenCast",
                 mDisplayWidth,
@@ -1073,11 +1093,13 @@ class FlutterScreenRecordingPlugin :
                 },
                 castHandler
             )
+
+            Log.d("ScreenRecordingPlugin", "✅ Virtual display created: $castVirtualDisplay")
             Log.d("ScreenRecordingPlugin", "✅ Screen cast capture setup complete")
 
-
         } catch (e: Exception) {
-            Log.e("ScreenRecordingPlugin", "Error setting up cast capture: ${e.message}")
+            Log.e("ScreenRecordingPlugin", "❌ Error setting up cast capture: ${e.message}")
+            e.printStackTrace()
         }
     }
 
@@ -1134,19 +1156,32 @@ class FlutterScreenRecordingPlugin :
         try {
             Log.d("ScreenRecordingPlugin", "📷 Processing screen frame...")
 
-            
+            // Check if image is still valid
+            if (image.planes.isEmpty()) {
+                Log.w("ScreenRecordingPlugin", "⚠️ Image has no planes, skipping...")
+                return
+            }
+
+            // Convert image to bitmap
             val bitmap = imageToBitmap(image)
-            Log.d("ScreenRecordingPlugin", "Bitmap created: ${bitmap.width}x${bitmap.height}")
+            Log.d("ScreenRecordingPlugin", "✅ Bitmap created: ${bitmap.width}x${bitmap.height}")
 
-            
+            // Compress bitmap to JPEG
             val outputStream = ByteArrayOutputStream()
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 60, outputStream)
+            val compressionQuality = 60 // Adjust quality for performance vs quality
+            bitmap.compress(Bitmap.CompressFormat.JPEG, compressionQuality, outputStream)
             val imageData = outputStream.toByteArray()
-            Log.d("ScreenRecordingPlugin", "Image compressed: ${imageData.size} bytes")
+            Log.d("ScreenRecordingPlugin", "✅ Image compressed: ${imageData.size} bytes")
 
-            
+            // Send to cast device
             sendImageToCastDevice(imageData)
 
+            // Clean up
+            bitmap.recycle()
+            outputStream.close()
+
+        } catch (e: IllegalStateException) {
+            Log.w("ScreenRecordingPlugin", "⚠️ Image was closed during processing, skipping frame")
         } catch (e: Exception) {
             Log.e("ScreenRecordingPlugin", "❌ Error processing screen frame: ${e.message}")
             e.printStackTrace()
@@ -1155,46 +1190,93 @@ class FlutterScreenRecordingPlugin :
 
     
     private fun imageToBitmap(image: Image): Bitmap {
-        val planes = image.planes
-        val buffer = planes[0].buffer
-        val pixelStride = planes[0].pixelStride
-        val rowStride = planes[0].rowStride
-        val rowPadding = rowStride - pixelStride * image.width
+        try {
+            val planes = image.planes
+            if (planes.isEmpty()) {
+                throw IllegalStateException("Image has no planes")
+            }
 
-        val bitmap = Bitmap.createBitmap(
-            image.width + rowPadding / pixelStride,
-            image.height,
-            Bitmap.Config.ARGB_8888
-        )
-        bitmap.copyPixelsFromBuffer(buffer)
+            val buffer = planes[0].buffer
+            val pixelStride = planes[0].pixelStride
+            val rowStride = planes[0].rowStride
+            val rowPadding = rowStride - pixelStride * image.width
 
-        return if (rowPadding == 0) {
-            bitmap
-        } else {
-            Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
+            val bitmap = Bitmap.createBitmap(
+                image.width + rowPadding / pixelStride,
+                image.height,
+                Bitmap.Config.ARGB_8888
+            )
+
+            bitmap.copyPixelsFromBuffer(buffer)
+
+            return if (rowPadding == 0) {
+                bitmap
+            } else {
+                Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
+            }
+        } catch (e: Exception) {
+            Log.e("ScreenRecordingPlugin", "❌ Error converting image to bitmap: ${e.message}")
+            // Create a fallback bitmap
+            return Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
         }
     }
 
     
     private fun sendImageToCastDevice(imageData: ByteArray) {
+//        try {
+//            Log.d("ScreenRecordingPlugin", "📡 Sending image to cast device...")
+//
+//            val base64Image = Base64.encodeToString(imageData, Base64.NO_WRAP)
+//            val message = """{"type":"screen_frame","data":"$base64Image","timestamp":${System.currentTimeMillis()}}"""
+//
+//            Log.d("ScreenRecordingPlugin", "Message size: ${message.length} characters")
+//
+//            currentCastSession?.sendMessage("urn:x-cast:com.yourapp.screencast", message)
+//                ?.setResultCallback { result ->
+//                    if (result.status.isSuccess) {
+//                        Log.d("ScreenRecordingPlugin", "✅ Screen data sent successfully")
+//                    } else {
+//                        Log.e("ScreenRecordingPlugin", "❌ Failed to send screen data: ${result.status}")
+//                    }
+//                }
+//        } catch (e: Exception) {
+//            Log.e("ScreenRecordingPlugin", "❌ Error sending screen data: ${e.message}")
+//            e.printStackTrace()
+//        }
         try {
-            Log.d("ScreenRecordingPlugin", "📡 Sending image to cast device...")
+            Log.d("ScreenRecordingPlugin", "📡 Preparing to send image to cast device...")
 
             val base64Image = Base64.encodeToString(imageData, Base64.NO_WRAP)
             val message = """{"type":"screen_frame","data":"$base64Image","timestamp":${System.currentTimeMillis()}}"""
 
             Log.d("ScreenRecordingPlugin", "Message size: ${message.length} characters")
 
-            currentCastSession?.sendMessage("urn:x-cast:com.yourapp.screencast", message)
-                ?.setResultCallback { result ->
-                    if (result.status.isSuccess) {
-                        Log.d("ScreenRecordingPlugin", "✅ Screen data sent successfully")
-                    } else {
-                        Log.e("ScreenRecordingPlugin", "❌ Failed to send screen data: ${result.status}")
+            // Use activity to run on UI thread
+            val activity = activityBinding?.activity
+            if (activity != null) {
+                activity.runOnUiThread {
+                    try {
+                        Log.d("ScreenRecordingPlugin", "📡 Sending on UI thread...")
+
+                        currentCastSession?.sendMessage("urn:x-cast:com.yourapp.screencast", message)
+                            ?.setResultCallback { result ->
+                                if (result.status.isSuccess) {
+                                    Log.d("ScreenRecordingPlugin", "✅ Screen data sent successfully")
+                                } else {
+                                    Log.e("ScreenRecordingPlugin", "❌ Failed to send screen data: ${result.status}")
+                                }
+                            }
+                    } catch (e: Exception) {
+                        Log.e("ScreenRecordingPlugin", "❌ Error sending on UI thread: ${e.message}")
+                        e.printStackTrace()
                     }
                 }
+            } else {
+                Log.e("ScreenRecordingPlugin", "❌ Activity not available for UI thread")
+            }
+
         } catch (e: Exception) {
-            Log.e("ScreenRecordingPlugin", "❌ Error sending screen data: ${e.message}")
+            Log.e("ScreenRecordingPlugin", "❌ Error preparing cast message: ${e.message}")
             e.printStackTrace()
         }
     }
@@ -1216,29 +1298,46 @@ class FlutterScreenRecordingPlugin :
         }
     }
 
-    
+
     private fun stopScreenCasting() {
         try {
-            
+            Log.d("ScreenRecordingPlugin", "🛑 Stopping screen casting...")
+
+            // Release virtual display
             castVirtualDisplay?.release()
             castVirtualDisplay = null
+            Log.d("ScreenRecordingPlugin", "✅ Cast virtual display released")
 
-            
+            // Close image reader
             castImageReader?.close()
             castImageReader = null
+            Log.d("ScreenRecordingPlugin", "✅ Cast image reader closed")
 
-            
+            // Dismiss presentation
             currentPresentation?.dismiss()
             currentPresentation = null
+            Log.d("ScreenRecordingPlugin", "✅ Presentation dismissed")
 
-            
+            // Unregister MediaProjection callback
+            if (castingMediaProjectionCallback != null && mMediaProjection != null) {
+                mMediaProjection?.unregisterCallback(castingMediaProjectionCallback!!)
+                castingMediaProjectionCallback = null
+                Log.d("ScreenRecordingPlugin", "✅ MediaProjection callback unregistered")
+            }
+
+            // Quit casting thread
             castThread?.quit()
             castThread = null
+            Log.d("ScreenRecordingPlugin", "✅ Casting thread stopped")
 
-            Log.d("ScreenRecordingPlugin", "Screen casting stopped")
+            // Reset casting flag
+            isCasting = false
+
+            Log.d("ScreenRecordingPlugin", "✅ Screen casting stopped completely")
 
         } catch (e: Exception) {
-            Log.e("ScreenRecordingPlugin", "Error stopping screen casting: ${e.message}")
+            Log.e("ScreenRecordingPlugin", "❌ Error stopping screen casting: ${e.message}")
+            e.printStackTrace()
         }
     }
 
@@ -1288,17 +1387,6 @@ class FlutterScreenRecordingPlugin :
         activityBinding = null
     }
 
-
-
-
-
-
-
-
-
-
-
-
     private fun getLocalIpAddress(): String {
         try {
             val networkInterfaces = NetworkInterface.getNetworkInterfaces()
@@ -1336,6 +1424,22 @@ class FlutterScreenRecordingPlugin :
 
         } catch (e: Exception) {
             Log.e("ScreenRecordingPlugin", "❌ Error checking cast configuration: ${e.message}")
+        }
+    }
+
+    private inner class CastingMediaProjectionCallback : MediaProjection.Callback() {
+        override fun onStop() {
+            Log.d("ScreenRecordingPlugin", "📱 MediaProjection stopped for casting")
+            // Clean up casting resources
+            stopScreenCasting()
+        }
+
+        override fun onCapturedContentResize(width: Int, height: Int) {
+            Log.d("ScreenRecordingPlugin", "📱 MediaProjection content resized: ${width}x${height}")
+        }
+
+        override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
+            Log.d("ScreenRecordingPlugin", "📱 MediaProjection content visibility changed: $isVisible")
         }
     }
 
